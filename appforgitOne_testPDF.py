@@ -22,10 +22,12 @@ if 'edit_mode_id' not in st.session_state: st.session_state.edit_mode_id = None
 def reset_analysis():
     st.session_state.analysis_result = None
     st.session_state.analysis_pdf = None
+    # Сбрасываем значения виджетов через session_state
     st.session_state["w_p_name"] = ""
     st.session_state["w_weight"] = 0.0
     st.session_state["w_anamnesis"] = ""
     st.session_state["w_dob"] = datetime.date(1980, 1, 1)
+    # Меняем ключ загрузчика, чтобы очистить файл
     st.session_state.uploader_key += 1
 
 # --- ПОДКЛЮЧЕНИЕ КЛЮЧЕЙ ---
@@ -86,14 +88,14 @@ def update_record_data(record_id, updated_data):
 
 def get_history_debug(user_id, show_all=False):
     all_records = records_table.all()
-    # Сортировка по времени создания (если есть поле Created At или системное createdTime)
+    # Сортировка по времени создания
     all_records.sort(key=lambda x: x.get('createdTime', ''), reverse=True)
     
     filtered_records = []
     
     for r in all_records:
         fields = r['fields']
-        # ВАЖНО: Добавляем ID самой записи внутрь словаря fields, чтобы потом к нему обращаться
+        # ВАЖНО: Добавляем ID самой записи внутрь словаря fields
         fields['record_id'] = r['id']
         fields['created_time'] = r.get('createdTime', '')
         
@@ -287,26 +289,34 @@ else:
             for item in history:
                 rec_id = item.get('record_id')
                 
-                # РЕЖИМ РЕДАКТИРОВАНИЯ ДЛЯ КОНКРЕТНОЙ КАРТОЧКИ
+                # РЕЖИМ РЕДАКТИРОВАНИЯ
                 if st.session_state.edit_mode_id == rec_id:
                     with st.container(border=True):
                         st.info(f"✏️ Редактирование записи: {item.get('Patient Name')}")
                         with st.form(key=f"edit_form_{rec_id}"):
                             new_name = st.text_input("ФИО", value=item.get('Patient Name', ''))
+                            
                             c_e1, c_e2, c_e3 = st.columns(3)
-                            new_gender = c_e1.selectbox("Пол", ["Мужской", "Женский"], index=0 if item.get('Gender')=="Мужской" else 1)
-                            new_biopsy = c_e2.selectbox("Метод", ["Мазок", "Пункция", "Эксцизия", "Резекция"], index=0) # Упрощенно index=0, можно доработать
+                            # Аккуратная обработка значений селекторов
+                            curr_gender = item.get('Gender', 'Мужской')
+                            gender_idx = 0 if curr_gender == "Мужской" else 1
+                            
+                            curr_biopsy = item.get('Biopsy Method', 'Мазок')
+                            biopsy_opts = ["Мазок", "Пункция", "Эксцизия", "Резекция"]
+                            biopsy_idx = biopsy_opts.index(curr_biopsy) if curr_biopsy in biopsy_opts else 0
+                            
+                            new_gender = c_e1.selectbox("Пол", ["Мужской", "Женский"], index=gender_idx)
+                            new_biopsy = c_e2.selectbox("Метод", biopsy_opts, index=biopsy_idx)
                             new_weight = c_e3.number_input("Вес", value=float(item.get('Weight', 0.0)))
                             
                             new_anamnesis = st.text_area("Анамнез", value=item.get('Anamnesis', ''))
                             new_full_text = st.text_area("Полный текст заключения (AI)", value=item.get('AI Conclusion', ''), height=200)
                             
                             col_save, col_cancel = st.columns(2)
-                            saved = col_save.form_submit_button("💾 Сохранить изменения", type="primary", use_container_width=True)
+                            saved = col_save.form_submit_button("💾 Сохранить", type="primary", use_container_width=True)
                             cancelled = col_cancel.form_submit_button("❌ Отмена", use_container_width=True)
                             
                             if saved:
-                                # Обновляем Airtable
                                 update_data = {
                                     "Patient Name": new_name,
                                     "Gender": new_gender,
@@ -352,8 +362,8 @@ else:
                         
                         with st.expander("📄 Полный текст и Действия"):
                             st.write(item.get('AI Conclusion', ''))
-                            
                             st.markdown("---")
+                            
                             c_act1, c_act2 = st.columns(2)
                             
                             # Кнопка РЕДАКТИРОВАТЬ
@@ -361,17 +371,15 @@ else:
                                 st.session_state.edit_mode_id = rec_id
                                 st.rerun()
                             
-                            # Кнопка ПЕЧАТЬ (Генерация PDF на лету)
+                            # Кнопка ПЕЧАТЬ (PDF)
                             if c_act2.button("🖨️ Печать (PDF)", key=f"btn_print_{rec_id}", use_container_width=True):
                                 with st.spinner("Генерация документа..."):
-                                    # 1. Пытаемся достать картинку из Airtable (она там в списке Attachments)
                                     img_obj = None
                                     if 'Image' in item and len(item['Image']) > 0:
                                         img_url = item['Image'][0].get('url')
                                         if img_url:
                                             img_obj = get_image_from_url(img_url)
                                     
-                                    # 2. Собираем данные
                                     p_data_pdf = {
                                         'p_name': p_name_db,
                                         'gender': gen,
@@ -381,10 +389,8 @@ else:
                                         'biopsy': method
                                     }
                                     
-                                    # 3. Создаем PDF
                                     pdf_bytes = create_pdf(p_data_pdf, item.get('AI Conclusion', ''), img_obj)
                                     
-                                    # 4. Предлагаем скачать (используем уникальный ключ, чтобы кнопка не пропадала сразу)
                                     st.download_button(
                                         label="📥 Скачать готовый PDF",
                                         data=pdf_bytes,
