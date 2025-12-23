@@ -8,14 +8,13 @@ from pyairtable import Api
 import time
 
 # --- НАСТРОЙКА СТРАНИЦЫ ---
-st.set_page_config(page_title="PathanAI Stable", page_icon="🔬")
+st.set_page_config(page_title="PathanAI Pro", page_icon="🔬", layout="wide")
 
 # --- ПОДКЛЮЧЕНИЕ КЛЮЧЕЙ ---
 try:
     gemini_key = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=gemini_key)
     
-    # Airtable ключи
     airtable_token = st.secrets["airtable"]["API_TOKEN"]
     base_id = st.secrets["airtable"]["BASE_ID"]
     table_users_name = st.secrets["airtable"]["TABLE_USERS"]
@@ -29,39 +28,28 @@ except Exception as e:
     st.error(f"⚠️ Ошибка настройки ключей: {e}")
     st.stop()
 
-# --- ФУНКЦИИ AIRTABLE ---
+# --- ФУНКЦИИ ---
 
 def login_user(name, password):
-    # Ищем пользователя по имени
     formula = f"{{Name}}='{name}'"
     try:
         matches = users_table.all(formula=formula)
-    except:
-        return None
-    
+    except: return None
     if matches:
         user_record = matches[0]
-        # Сверяем пароль
         if user_record['fields'].get('Password') == password:
             return user_record
     return None
 
 def register_user(name, password, email):
-    # Проверка на дубликат имени
     formula = f"{{Name}}='{name}'"
     matches = users_table.all(formula=formula)
-    if matches:
-        return False
-    
-    # Создание пользователя
-    users_table.create({
-        "Name": name, "Password": password, "Email": email, "Role": "Doctor"
-    })
+    if matches: return False
+    users_table.create({"Name": name, "Password": password, "Email": email, "Role": "Doctor"})
     return True
 
 def save_analysis(patient_data, analysis_full, summary, image_file, user_id):
-    # Сохраняем в Airtable
-    # Названия ключей (слева) должны точь-в-точь совпадать с заголовками в вашей CSV/Airtable
+    # Данные точно совпадают с Airtable
     record_data = {
         "Patient Name": patient_data['p_name'],
         "Gender": patient_data['gender'],
@@ -71,24 +59,20 @@ def save_analysis(patient_data, analysis_full, summary, image_file, user_id):
         "Biopsy Method": patient_data['biopsy'],
         "AI Conclusion": analysis_full,
         "Short Summary": summary,
-        "Doctor": [user_id] # Связь с врачом
+        "Doctor": [user_id]
     }
-    # Создаем запись
     records_table.create(record_data)
 
 def get_doctor_history(user_id):
-    # История только текущего врача
     all_records = records_table.all()
     my_records = []
     for r in all_records:
-        # Проверяем, что в поле Doctor есть наш ID
         if 'Doctor' in r['fields'] and user_id in r['fields']['Doctor']:
             my_records.append(r['fields'])
-    # Новые сверху
-    my_records.reverse() 
+    # Сортировка по дате создания (новые сверху)
+    my_records.sort(key=lambda x: x.get('Created At', ''), reverse=True)
     return my_records
 
-# --- ФУНКЦИЯ PDF ---
 def create_pdf(patient_data, analysis_text, image_obj):
     pdf = FPDF()
     pdf.add_page()
@@ -125,7 +109,7 @@ def create_pdf(patient_data, analysis_text, image_obj):
 
 
 # ==========================================
-# ЛОГИКА ПРИЛОЖЕНИЯ
+# ЛОГИКА ИНТЕРФЕЙСА
 # ==========================================
 
 if "user_id" not in st.session_state:
@@ -133,113 +117,121 @@ if "user_id" not in st.session_state:
 if "user_name" not in st.session_state:
     st.session_state.user_name = None
 
-# --- ЭКРАН ВХОДА ---
+# --- ВХОД / РЕГИСТРАЦИЯ ---
 if st.session_state.user_id is None:
     st.title("🔐 PathanAI: Вход")
-    tab1, tab2 = st.tabs(["Вход", "Регистрация"])
+    c1, c2 = st.columns([1, 2]) # Сделаем колонки для аккуратности
     
-    with tab1:
-        name = st.text_input("Имя Фамилия")
-        pwd = st.text_input("Пароль", type="password")
-        if st.button("Войти"):
-            u = login_user(name, pwd)
-            if u:
-                st.session_state.user_id = u['id']
-                st.session_state.user_name = u['fields'].get('Name')
-                st.rerun()
-            else: st.error("Неверное имя или пароль")
-            
-    with tab2:
-        n = st.text_input("Ваше Имя")
-        p = st.text_input("Придумайте Пароль", type="password")
-        e = st.text_input("Email")
-        if st.button("Зарегистрироваться"):
-            if register_user(n, p, e): st.success("Успешно! Теперь войдите.")
-            else: st.error("Такое имя уже занято.")
+    with c1:
+        tab1, tab2 = st.tabs(["Вход", "Регистрация"])
+        
+        with tab1:
+            name = st.text_input("Имя Фамилия")
+            pwd = st.text_input("Пароль", type="password")
+            if st.button("Войти", use_container_width=True):
+                u = login_user(name, pwd)
+                if u:
+                    st.session_state.user_id = u['id']
+                    st.session_state.user_name = u['fields'].get('Name')
+                    st.rerun()
+                else: st.error("Ошибка входа")
+                
+        with tab2:
+            n = st.text_input("Ваше Имя")
+            p = st.text_input("Пароль", type="password")
+            e = st.text_input("Email")
+            if st.button("Создать аккаунт", use_container_width=True):
+                if register_user(n, p, e): st.success("Готово! Войдите.")
+                else: st.error("Имя занято")
 
-# --- РАБОЧИЙ КАБИНЕТ ---
+# --- ГЛАВНОЕ ПРИЛОЖЕНИЕ ---
 else:
-    with st.sidebar:
-        st.write(f"👨‍⚕️ Врач: **{st.session_state.user_name}**")
+    # Шапка
+    c_logo, c_user = st.columns([5, 1])
+    with c_logo:
+        st.title("🔬 PathanAI: Рабочее место")
+    with c_user:
+        st.write(f"👨‍⚕️ **{st.session_state.user_name}**")
         if st.button("Выйти"):
             st.session_state.user_id = None
             st.rerun()
-        
-        st.divider()
-        st.caption("История анализов")
-        if st.button("Обновить"): st.rerun()
-        
-        hist = get_doctor_history(st.session_state.user_id)
-        if hist:
-            for h in hist:
-                d = h.get('Created At', '')[:10]
-                pat = h.get('Patient Name', '?')
-                with st.expander(f"{d} | {pat}"):
-                    st.write(h.get('Short Summary'))
-        else:
-            st.info("Пусто")
-
-    # ОСНОВНОЙ ЭКРАН
-    st.title("🔬 PathanAI: Анализ")
     
-    with st.expander("📝 Карточка пациента", expanded=True):
-        p_name = st.text_input("ФИО Пациента")
-        
-        c1, c2 = st.columns(2)
-        # Опции совпадают с вашими данными ("Мужской", "Женский")
-        gender = c1.selectbox("Пол", ["Мужской", "Женский"])
-        # Опции совпадают с вашей колонкой Biopsy Method ("Мазок" и т.д.)
-        biopsy = c2.selectbox("Вид биопсии", ["Мазок", "Пункция", "Эксцизия", "Резекция"])
-        
-        c3, c4 = st.columns(2)
-        weight = c3.number_input("Вес", 0.0)
-        dob = c4.date_input("Дата рождения", datetime.date(1980,1,1))
-        
-        anamnesis = st.text_area("Анамнез")
-        
-    upl = st.file_uploader("Загрузить снимок", type=["jpg", "png", "jpeg"])
-    
-    if upl:
-        img = Image.open(upl)
-        st.image(img, width=400)
-        
-        if st.button("🚀 Начать анализ", type="primary"):
-            if not p_name: 
-                st.warning("Введите имя пациента!")
-            else:
-                with st.spinner("ИИ анализирует снимок..."):
-                    try:
-                        # Используем стабильную модель
-                        model = genai.GenerativeModel('gemini-flash-latest')
-                        
-                        prompt = f"Роль: Патологоанатом. Пациент: {p_name}, {gender}, {weight}, {dob}. Метод: {biopsy}. Анамнез: {anamnesis}. Опиши гистологию, дай заключение и КРАТКИЙ ВЫВОД."
-                        
-                        res = model.generate_content([prompt, img])
-                        txt = res.text
-                        
-                        # Краткий вывод для базы
-                        summ = txt.split("ВЫВОД")[-1][:200] if "ВЫВОД" in txt else "См. полный отчет"
-                        st.markdown("### Результат")
-                        st.write(txt)
-                        
-                        # Собираем данные
-                        p_data = {
-                            "p_name": p_name, 
-                            "gender": gender, 
-                            "weight": weight, 
-                            "dob": dob, 
-                            "anamnesis": anamnesis,
-                            "biopsy": biopsy
-                        }
+    st.markdown("---")
 
-                        # Сохраняем в Airtable
-                        save_analysis(p_data, txt, summ, img, st.session_state.user_id)
-                        
-                        # Генерируем PDF
-                        pdf = create_pdf(p_data, txt, img)
-                        st.download_button("Скачать PDF", pdf, "report.pdf", "application/pdf")
-                        
-                        st.success("✅ Анализ сохранен в базу!")
-                        
-                    except Exception as e:
-                        st.error(f"Ошибка: {e}")
+    # ВКЛАДКИ (ГЛАВНОЕ ИЗМЕНЕНИЕ)
+    tab_new, tab_archive = st.tabs(["🧬 Новый анализ", "🗂 Архив пациентов"])
+
+    # === ВКЛАДКА 1: НОВЫЙ АНАЛИЗ ===
+    with tab_new:
+        with st.container(border=True):
+            st.subheader("Данные пациента")
+            p_name = st.text_input("ФИО Пациента", placeholder="Иванов И.И.")
+            
+            c1, c2, c3 = st.columns(3)
+            gender = c1.selectbox("Пол", ["Мужской", "Женский"])
+            biopsy = c2.selectbox("Метод", ["Мазок", "Пункция", "Эксцизия", "Резекция"])
+            dob = c3.date_input("Дата рождения", datetime.date(1980,1,1))
+            
+            c4, c5 = st.columns(2)
+            weight = c4.number_input("Вес (кг)", 0.0)
+            anamnesis = st.text_area("Анамнез / Описание", height=100)
+
+        st.write("") # Отступ
+        
+        with st.container(border=True):
+            st.subheader("Загрузка материала")
+            upl = st.file_uploader("Загрузить гистологический снимок", type=["jpg", "png", "jpeg"])
+            
+            if upl:
+                img = Image.open(upl)
+                st.image(img, width=400)
+                
+                if st.button("🚀 Запустить анализ", type="primary", use_container_width=True):
+                    if not p_name: 
+                        st.warning("Введите ФИО пациента!")
+                    else:
+                        with st.spinner("ИИ анализирует снимок..."):
+                            try:
+                                model = genai.GenerativeModel('gemini-flash-latest')
+                                prompt = f"Роль: Патологоанатом. Пациент: {p_name}, {gender}, {weight}, {dob}. Метод: {biopsy}. Анамнез: {anamnesis}. Опиши гистологию, дай заключение и КРАТКИЙ ВЫВОД."
+                                
+                                res = model.generate_content([prompt, img])
+                                txt = res.text
+                                summ = txt.split("ВЫВОД")[-1][:200] if "ВЫВОД" in txt else "См. полный отчет"
+                                
+                                st.success("Анализ завершен!")
+                                st.markdown("### Результат")
+                                st.write(txt)
+                                
+                                p_data = {"p_name": p_name, "gender": gender, "weight": weight, "dob": dob, "anamnesis": anamnesis, "biopsy": biopsy}
+                                save_analysis(p_data, txt, summ, img, st.session_state.user_id)
+                                
+                                pdf = create_pdf(p_data, txt, img)
+                                st.download_button("📥 Скачать PDF отчет", pdf, f"report_{p_name}.pdf", "application/pdf", use_container_width=True)
+                                
+                            except Exception as e:
+                                st.error(f"Ошибка: {e}")
+
+    # === ВКЛАДКА 2: ИСТОРИЯ (АРХИВ) ===
+    with tab_archive:
+        st.subheader("История анализов")
+        
+        # Поиск
+        search_query = st.text_input("🔍 Поиск по ФИО...", placeholder="Начните вводить фамилию").lower()
+        
+        if st.button("🔄 Обновить список"):
+            st.rerun()
+            
+        history = get_doctor_history(st.session_state.user_id)
+        
+        if history:
+            count = 0
+            for item in history:
+                # Фильтрация поиска
+                p_name_db = item.get('Patient Name', 'Без имени')
+                if search_query and search_query not in p_name_db.lower():
+                    continue
+                
+                count += 1
+                
+                # Данные для отобра
