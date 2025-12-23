@@ -59,19 +59,39 @@ def save_analysis(patient_data, analysis_full, summary, image_file, user_id):
         "Biopsy Method": patient_data['biopsy'],
         "AI Conclusion": analysis_full,
         "Short Summary": summary,
-        "Doctor": [user_id]
+        "Doctor": [user_id] # ВАЖНО: Это поле должно быть типом Link to Users
     }
     records_table.create(record_data)
 
-def get_doctor_history(user_id):
+def get_history_debug(user_id, show_all=False):
+    # Получаем вообще ВСЕ записи
     all_records = records_table.all()
-    my_records = []
+    
+    # Сортировка: новые сверху (обработка случаев без даты)
+    all_records.sort(key=lambda x: x['fields'].get('Created At', ''), reverse=True)
+    
+    filtered_records = []
+    
     for r in all_records:
-        if 'Doctor' in r['fields'] and user_id in r['fields']['Doctor']:
-            my_records.append(r['fields'])
-    # Сортировка по дате создания (новые сверху)
-    my_records.sort(key=lambda x: x.get('Created At', ''), reverse=True)
-    return my_records
+        fields = r['fields']
+        
+        # Логика фильтрации
+        is_my_record = False
+        if 'Doctor' in fields:
+            # Doctor возвращается как список ID ['rec...']
+            if user_id in fields['Doctor']:
+                is_my_record = True
+        
+        if show_all:
+            # В режиме отладки добавляем метку, чей это файл
+            fields['_debug_is_mine'] = is_my_record
+            fields['_debug_doctor_field'] = fields.get('Doctor', 'ПУСТО')
+            filtered_records.append(fields)
+        elif is_my_record:
+            # В обычном режиме только мои
+            filtered_records.append(fields)
+            
+    return filtered_records
 
 def create_pdf(patient_data, analysis_text, image_obj):
     pdf = FPDF()
@@ -120,11 +140,10 @@ if "user_name" not in st.session_state:
 # --- ВХОД / РЕГИСТРАЦИЯ ---
 if st.session_state.user_id is None:
     st.title("🔐 PathanAI: Вход")
-    c1, c2 = st.columns([1, 2]) # Сделаем колонки для аккуратности
+    c1, c2 = st.columns([1, 2])
     
     with c1:
         tab1, tab2 = st.tabs(["Вход", "Регистрация"])
-        
         with tab1:
             name = st.text_input("Имя Фамилия")
             pwd = st.text_input("Пароль", type="password")
@@ -135,7 +154,6 @@ if st.session_state.user_id is None:
                     st.session_state.user_name = u['fields'].get('Name')
                     st.rerun()
                 else: st.error("Ошибка входа")
-                
         with tab2:
             n = st.text_input("Ваше Имя")
             p = st.text_input("Пароль", type="password")
@@ -147,18 +165,19 @@ if st.session_state.user_id is None:
 # --- ГЛАВНОЕ ПРИЛОЖЕНИЕ ---
 else:
     # Шапка
-    c_logo, c_user = st.columns([5, 1])
+    c_logo, c_user = st.columns([5, 2])
     with c_logo:
         st.title("🔬 PathanAI: Рабочее место")
     with c_user:
         st.write(f"👨‍⚕️ **{st.session_state.user_name}**")
+        st.caption(f"ID: {st.session_state.user_id}") # DEBUG INFO
         if st.button("Выйти"):
             st.session_state.user_id = None
             st.rerun()
     
     st.markdown("---")
 
-    # ВКЛАДКИ (ГЛАВНОЕ ИЗМЕНЕНИЕ)
+    # ВКЛАДКИ
     tab_new, tab_archive = st.tabs(["🧬 Новый анализ", "🗂 Архив пациентов"])
 
     # === ВКЛАДКА 1: НОВЫЙ АНАЛИЗ ===
@@ -176,7 +195,7 @@ else:
             weight = c4.number_input("Вес (кг)", 0.0)
             anamnesis = st.text_area("Анамнез / Описание", height=100)
 
-        st.write("") # Отступ
+        st.write("")
         
         with st.container(border=True):
             st.subheader("Загрузка материала")
@@ -190,7 +209,7 @@ else:
                     if not p_name: 
                         st.warning("Введите ФИО пациента!")
                     else:
-                        with st.spinner("ИИ анализирует снимок..."):
+                        with st.spinner("Анализ..."):
                             try:
                                 model = genai.GenerativeModel('gemini-flash-latest')
                                 prompt = f"Роль: Патологоанатом. Пациент: {p_name}, {gender}, {weight}, {dob}. Метод: {biopsy}. Анамнез: {anamnesis}. Опиши гистологию, дай заключение и КРАТКИЙ ВЫВОД."
@@ -199,39 +218,63 @@ else:
                                 txt = res.text
                                 summ = txt.split("ВЫВОД")[-1][:200] if "ВЫВОД" in txt else "См. полный отчет"
                                 
-                                st.success("Анализ завершен!")
-                                st.markdown("### Результат")
+                                st.success("Готово!")
                                 st.write(txt)
                                 
                                 p_data = {"p_name": p_name, "gender": gender, "weight": weight, "dob": dob, "anamnesis": anamnesis, "biopsy": biopsy}
                                 save_analysis(p_data, txt, summ, img, st.session_state.user_id)
                                 
                                 pdf = create_pdf(p_data, txt, img)
-                                st.download_button("📥 Скачать PDF отчет", pdf, f"report_{p_name}.pdf", "application/pdf", use_container_width=True)
+                                st.download_button("📥 Скачать PDF", pdf, f"report.pdf", "application/pdf")
                                 
                             except Exception as e:
                                 st.error(f"Ошибка: {e}")
 
     # === ВКЛАДКА 2: ИСТОРИЯ (АРХИВ) ===
     with tab_archive:
-        st.subheader("История анализов")
-        
-        # Поиск
-        search_query = st.text_input("🔍 Поиск по ФИО...", placeholder="Начните вводить фамилию").lower()
+        c_head, c_check = st.columns([3, 2])
+        with c_head:
+            st.subheader("История анализов")
+        with c_check:
+            # ВОТ ЭТА ГАЛОЧКА ПОКАЖЕТ ПОТЕРЯННЫЕ ЗАПИСИ
+            show_debug = st.checkbox("🕵️‍♂️ Показать ВСЕ записи (Debug)")
         
         if st.button("🔄 Обновить список"):
             st.rerun()
             
-        history = get_doctor_history(st.session_state.user_id)
+        # Загружаем историю (с флагом debug или без)
+        history = get_history_debug(st.session_state.user_id, show_all=show_debug)
         
         if history:
-            count = 0
             for item in history:
-                # Фильтрация поиска
                 p_name_db = item.get('Patient Name', 'Без имени')
-                if search_query and search_query not in p_name_db.lower():
-                    continue
+                date_created = item.get('Created At', '')[:10]
+                summary = item.get('Short Summary', 'Нет данных')
+                method = item.get('Biopsy Method', '-')
+                gen = item.get('Gender', '?')
+                icon = "👨" if gen == "Мужской" else "👩"
                 
-                count += 1
+                # Цвет границы: зеленый (мой) или красный (чужой/потерянный)
+                border_color = "green"
+                debug_info = ""
                 
-                # Данные для отобра
+                if show_debug:
+                    if item.get('_debug_is_mine'):
+                        debug_info = "✅ МОЯ ЗАПИСЬ"
+                    else:
+                        debug_info = f"❌ ЧУЖАЯ ИЛИ БЕЗ ВРАЧА (Поле Doctor: {item.get('_debug_doctor_field')})"
+                
+                with st.container(border=True):
+                    if show_debug: st.caption(debug_info)
+                    
+                    col_h1, col_h2, col_h3 = st.columns([3, 2, 2])
+                    with col_h1: st.markdown(f"**{icon} {p_name_db}**")
+                    with col_h2: st.caption(f"📅 {date_created}")
+                    with col_h3: st.caption(f"🔬 {method}")
+                    
+                    st.divider()
+                    st.write(summary)
+        else:
+            st.info("Архив пуст.")
+            if not show_debug:
+                st.caption("Попробуйте нажать галочку 'Показать ВСЕ записи', возможно ваши записи остались без привязки.")
