@@ -15,12 +15,10 @@ except (FileNotFoundError, KeyError):
 # --- НАСТРОЙКА МОДЕЛИ ---
 genai.configure(api_key=api_key)
 
-# Функция для получения рабочей модели
 def get_model():
     valid_model = None
     try:
         all_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        # Приоритет: Flash -> Pro -> Любая
         for name in all_models:
             if 'flash' in name:
                 valid_model = name
@@ -65,17 +63,15 @@ with st.expander("📝 Данные пациента (Нажмите, чтобы
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "chat_session" not in st.session_state:
-    st.session_state.chat_session = None # Здесь будем хранить объект чата Google
+    st.session_state.chat_session = None 
 
 # --- ШАГ 2: ЗАГРУЗКА ФОТО ---
 uploaded_file = st.file_uploader("Загрузите снимок для начала чата", type=["jpg", "png", "jpeg"])
 
-# Логика сброса чата при смене файла
 if "last_file" not in st.session_state:
     st.session_state.last_file = None
 
 if uploaded_file and uploaded_file.name != st.session_state.last_file:
-    # Если загрузили новый файл - чистим историю
     st.session_state.messages = []
     st.session_state.chat_session = None
     st.session_state.last_file = uploaded_file.name
@@ -83,71 +79,60 @@ if uploaded_file and uploaded_file.name != st.session_state.last_file:
 # --- ОСНОВНАЯ ЛОГИКА ---
 if uploaded_file:
     image = Image.open(uploaded_file)
-    st.image(image, caption="Образец", width=300) # Делаем картинку поменьше, чтобы не мешала чату
+    st.image(image, caption="Образец", width=300)
 
-    # Если история пуста, показываем кнопку "Начать анализ"
+    # Если история пуста, показываем кнопку запуска
     if not st.session_state.messages:
         if st.button("🚀 Начать анализ", type="primary"):
             if not model_name:
                 st.error("Ошибка подключения к AI.")
             else:
                 with st.spinner('ИИ анализирует снимок...'):
-                    # 1. Формируем первый системный промпт
+                    # --- ИЗМЕНЕНИЯ ЗДЕСЬ: Добавлен пункт про Краткий вывод ---
                     initial_prompt = f"""
                     Ты эксперт-патологоанатом. Проанализируй этот снимок.
                     Данные пациента: Пол {gender}, Вес {weight}, Д.Р. {dob}, Курение: {smoking}.
                     Тип ткани: {tissue_type}, Метод: {biopsy_method}.
                     Анамнез: {anamnesis}.
                     
-                    Дай подробное описание: микроскопия, патология, заключение.
-                    Будь готов отвечать на уточняющие вопросы врача.
+                    Структура твоего ответа должна быть такой:
+                    1. Микроскопическое описание (подробно).
+                    2. Патологические изменения.
+                    3. Развернутое заключение.
+                    4. ОЧЕНЬ КРАТКИЙ ВЫВОД (резюме в 1-2 предложениях, самая суть для быстрого чтения).
                     """
                     
                     try:
-                        # Запускаем чат-сессию. Важно: передаем историю (сначала пустую)
                         model = genai.GenerativeModel(model_name)
                         chat = model.start_chat(history=[])
-                        
-                        # Отправляем первое сообщение С КАРТИНКОЙ
                         response = chat.send_message([initial_prompt, image])
                         
-                        # Сохраняем сессию и сообщение в память
                         st.session_state.chat_session = chat
                         st.session_state.messages.append({"role": "assistant", "content": response.text})
-                        
-                        # Перезагружаем страницу, чтобы отобразить чат
                         st.rerun()
                         
                     except Exception as e:
                         st.error(f"Ошибка: {e}")
 
     # --- ОТОБРАЖЕНИЕ ЧАТА ---
-    # Показываем все сообщения из истории
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # --- ПОЛЕ ВВОДА НОВОГО ВОПРОСА ---
+    # --- ПОЛЕ ВВОДА ---
     if prompt := st.chat_input("Задайте уточняющий вопрос по снимку..."):
-        # 1. Показываем сообщение пользователя
         with st.chat_message("user"):
             st.markdown(prompt)
-        # Добавляем в историю для отображения
         st.session_state.messages.append({"role": "user", "content": prompt})
 
-        # 2. Отправляем в Google (в существующую сессию)
         if st.session_state.chat_session:
             try:
                 with st.spinner("Думаю..."):
                     response = st.session_state.chat_session.send_message(prompt)
-                    
-                    # 3. Показываем ответ модели
                     with st.chat_message("assistant"):
                         st.markdown(response.text)
-                    
-                    # Добавляем в историю
                     st.session_state.messages.append({"role": "assistant", "content": response.text})
             except Exception as e:
                 st.error(f"Ошибка соединения: {e}")
         else:
-            st.error("Сессия истекла. Пожалуйста, перезагрузите страницу или нажмите 'Начать анализ' заново.")
+            st.error("Сессия истекла. Перезагрузите страницу.")
