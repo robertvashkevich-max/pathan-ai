@@ -175,7 +175,7 @@ else:
     with st.expander("📝 Карточка пациента", expanded=True):
         p_name = st.text_input("ФИО Пациента")
         c1, c2, c3 = st.columns(3)
-        gender = c1.selectbox("Пол", ["М", "Ж"])
+        gender = c1.selectbox("Пол", ["Мужской", "Женский"])
         weight = c2.number_input("Вес", 0.0)
         dob = c3.date_input("Дата рождения", datetime.date(1980,1,1))
         anamnesis = st.text_area("Анамнез")
