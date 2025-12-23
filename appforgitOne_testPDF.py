@@ -32,6 +32,7 @@ except Exception as e:
 # --- ФУНКЦИИ AIRTABLE ---
 
 def login_user(name, password):
+    # Ищем пользователя по имени
     formula = f"{{Name}}='{name}'"
     try:
         matches = users_table.all(formula=formula)
@@ -40,16 +41,19 @@ def login_user(name, password):
     
     if matches:
         user_record = matches[0]
+        # Сверяем пароль
         if user_record['fields'].get('Password') == password:
             return user_record
     return None
 
 def register_user(name, password, email):
+    # Проверка на дубликат имени
     formula = f"{{Name}}='{name}'"
     matches = users_table.all(formula=formula)
     if matches:
         return False
     
+    # Создание пользователя
     users_table.create({
         "Name": name, "Password": password, "Email": email, "Role": "Doctor"
     })
@@ -57,24 +61,30 @@ def register_user(name, password, email):
 
 def save_analysis(patient_data, analysis_full, summary, image_file, user_id):
     # Сохраняем в Airtable
-    records_table.create({
+    # Названия ключей (слева) должны точь-в-точь совпадать с заголовками в вашей CSV/Airtable
+    record_data = {
         "Patient Name": patient_data['p_name'],
         "Gender": patient_data['gender'],
         "Weight": patient_data['weight'],
         "Birth Date": str(patient_data['dob']),
         "Anamnesis": patient_data['anamnesis'],
+        "Biopsy Method": patient_data['biopsy'],
         "AI Conclusion": analysis_full,
         "Short Summary": summary,
-        "Doctor": [user_id]
-    })
+        "Doctor": [user_id] # Связь с врачом
+    }
+    # Создаем запись
+    records_table.create(record_data)
 
 def get_doctor_history(user_id):
     # История только текущего врача
     all_records = records_table.all()
     my_records = []
     for r in all_records:
+        # Проверяем, что в поле Doctor есть наш ID
         if 'Doctor' in r['fields'] and user_id in r['fields']['Doctor']:
             my_records.append(r['fields'])
+    # Новые сверху
     my_records.reverse() 
     return my_records
 
@@ -95,7 +105,7 @@ def create_pdf(patient_data, analysis_text, image_obj):
     pdf.set_fill_color(240, 240, 240)
     pdf.set_font('DejaVu', '', 12)
     pdf.cell(0, 10, 'ДАННЫЕ:', ln=True, fill=True)
-    text = f"Пациент: {patient_data['p_name']}\nПол: {patient_data['gender']} | Вес: {patient_data['weight']}\nАнамнез: {patient_data['anamnesis']}"
+    text = f"Пациент: {patient_data['p_name']}\nПол: {patient_data['gender']} | Метод: {patient_data['biopsy']}\nВес: {patient_data['weight']} | Д.Р.: {patient_data['dob']}\nАнамнез: {patient_data['anamnesis']}"
     pdf.multi_cell(0, 8, text)
     pdf.ln(5)
 
@@ -174,10 +184,17 @@ else:
     
     with st.expander("📝 Карточка пациента", expanded=True):
         p_name = st.text_input("ФИО Пациента")
-        c1, c2, c3 = st.columns(3)
+        
+        c1, c2 = st.columns(2)
+        # Опции совпадают с вашими данными ("Мужской", "Женский")
         gender = c1.selectbox("Пол", ["Мужской", "Женский"])
-        weight = c2.number_input("Вес", 0.0)
-        dob = c3.date_input("Дата рождения", datetime.date(1980,1,1))
+        # Опции совпадают с вашей колонкой Biopsy Method ("Мазок" и т.д.)
+        biopsy = c2.selectbox("Вид биопсии", ["Мазок", "Пункция", "Эксцизия", "Резекция"])
+        
+        c3, c4 = st.columns(2)
+        weight = c3.number_input("Вес", 0.0)
+        dob = c4.date_input("Дата рождения", datetime.date(1980,1,1))
+        
         anamnesis = st.text_area("Анамнез")
         
     upl = st.file_uploader("Загрузить снимок", type=["jpg", "png", "jpeg"])
@@ -192,27 +209,37 @@ else:
             else:
                 with st.spinner("ИИ анализирует снимок..."):
                     try:
-                        # ИСПОЛЬЗУЕМ СТАБИЛЬНУЮ МОДЕЛЬ
+                        # Используем стабильную модель
                         model = genai.GenerativeModel('gemini-flash-latest')
                         
-                        prompt = f"Роль: Патологоанатом. Пациент: {p_name}, {gender}, {weight}, {dob}. Анамнез: {anamnesis}. Опиши гистологию, дай заключение и КРАТКИЙ ВЫВОД."
+                        prompt = f"Роль: Патологоанатом. Пациент: {p_name}, {gender}, {weight}, {dob}. Метод: {biopsy}. Анамнез: {anamnesis}. Опиши гистологию, дай заключение и КРАТКИЙ ВЫВОД."
                         
                         res = model.generate_content([prompt, img])
                         txt = res.text
                         
-                        # Вывод
+                        # Краткий вывод для базы
                         summ = txt.split("ВЫВОД")[-1][:200] if "ВЫВОД" in txt else "См. полный отчет"
                         st.markdown("### Результат")
                         st.write(txt)
                         
-                        # Сохранение
-                        save_analysis({"p_name": p_name, "gender": gender, "weight": weight, "dob": dob, "anamnesis": anamnesis}, txt, summ, img, st.session_state.user_id)
+                        # Собираем данные
+                        p_data = {
+                            "p_name": p_name, 
+                            "gender": gender, 
+                            "weight": weight, 
+                            "dob": dob, 
+                            "anamnesis": anamnesis,
+                            "biopsy": biopsy
+                        }
+
+                        # Сохраняем в Airtable
+                        save_analysis(p_data, txt, summ, img, st.session_state.user_id)
                         
-                        # PDF
-                        pdf = create_pdf({"p_name": p_name, "gender": gender, "weight": weight, "dob": dob, "anamnesis": anamnesis}, txt, img)
+                        # Генерируем PDF
+                        pdf = create_pdf(p_data, txt, img)
                         st.download_button("Скачать PDF", pdf, "report.pdf", "application/pdf")
                         
                         st.success("✅ Анализ сохранен в базу!")
                         
                     except Exception as e:
-                        st.error(f"Ошибка API: {e}")
+                        st.error(f"Ошибка: {e}")
