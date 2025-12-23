@@ -16,7 +16,6 @@ st.set_page_config(page_title="PathanAI Pro", page_icon="🔬", layout="wide")
 if 'analysis_result' not in st.session_state: st.session_state.analysis_result = None
 if 'analysis_pdf' not in st.session_state: st.session_state.analysis_pdf = None
 if 'uploader_key' not in st.session_state: st.session_state.uploader_key = 0
-if 'edit_mode_id' not in st.session_state: st.session_state.edit_mode_id = None
 
 # --- ФУНКЦИЯ СБРОСА ---
 def reset_analysis():
@@ -80,9 +79,6 @@ def save_analysis(patient_data, analysis_full, summary, image_file, user_id):
     }
     records_table.create(record_data)
 
-def update_record_data(record_id, updated_data):
-    records_table.update(record_id, updated_data)
-
 def get_all_history_records():
     # Загружаем ВСЕ записи без фильтрации по врачу
     all_records = records_table.all()
@@ -92,7 +88,7 @@ def get_all_history_records():
     processed_records = []
     for r in all_records:
         fields = r['fields']
-        fields['record_id'] = r['id'] # Сохраняем ID для редактирования
+        fields['record_id'] = r['id'] 
         fields['created_time'] = r.get('createdTime', '')
         processed_records.append(fields)
             
@@ -272,109 +268,52 @@ else:
         if history:
             for item in history:
                 rec_id = item.get('record_id')
+                p_name_db = item.get('Patient Name', 'Без имени')
+                date_created = item.get('Created At', '')[:10]
+                summary = item.get('Short Summary', 'Нет данных')
+                method = item.get('Biopsy Method', '-')
+                gen = item.get('Gender', '?')
+                icon = "👨" if gen == "Мужской" else "👩"
                 
-                # --- РЕЖИМ РЕДАКТИРОВАНИЯ ---
-                if st.session_state.edit_mode_id == rec_id:
-                    with st.container(border=True):
-                        st.info(f"✏️ Редактирование записи: {item.get('Patient Name')}")
-                        with st.form(key=f"edit_form_{rec_id}"):
-                            new_name = st.text_input("ФИО", value=item.get('Patient Name', ''))
-                            
-                            c_e1, c_e2, c_e3 = st.columns(3)
-                            # Настройка текущих значений
-                            curr_gender = item.get('Gender', 'Мужской')
-                            gender_idx = 0 if curr_gender == "Мужской" else 1
-                            
-                            curr_biopsy = item.get('Biopsy Method', 'Мазок')
-                            biopsy_opts = ["Мазок", "Пункция", "Эксцизия", "Резекция"]
-                            biopsy_idx = biopsy_opts.index(curr_biopsy) if curr_biopsy in biopsy_opts else 0
-                            
-                            new_gender = c_e1.selectbox("Пол", ["Мужской", "Женский"], index=gender_idx)
-                            new_biopsy = c_e2.selectbox("Метод", biopsy_opts, index=biopsy_idx)
-                            new_weight = c_e3.number_input("Вес", value=float(item.get('Weight', 0.0)))
-                            
-                            new_anamnesis = st.text_area("Анамнез", value=item.get('Anamnesis', ''))
-                            new_full_text = st.text_area("Полный текст заключения (AI)", value=item.get('AI Conclusion', ''), height=200)
-                            
-                            col_save, col_cancel = st.columns(2)
-                            saved = col_save.form_submit_button("💾 Сохранить", type="primary", use_container_width=True)
-                            cancelled = col_cancel.form_submit_button("❌ Отмена", use_container_width=True)
-                            
-                            if saved:
-                                update_data = {
-                                    "Patient Name": new_name,
-                                    "Gender": new_gender,
-                                    "Biopsy Method": new_biopsy,
-                                    "Weight": new_weight,
-                                    "Anamnesis": new_anamnesis,
-                                    "AI Conclusion": new_full_text,
-                                    "Short Summary": new_full_text.split("ВЫВОД")[-1][:200] if "ВЫВОД" in new_full_text else "Изменено вручную"
-                                }
-                                update_record_data(rec_id, update_data)
-                                st.session_state.edit_mode_id = None
-                                st.success("Запись обновлена!")
-                                time.sleep(0.5)
-                                st.rerun()
-                            
-                            if cancelled:
-                                st.session_state.edit_mode_id = None
-                                st.rerun()
-
-                # --- РЕЖИМ ПРОСМОТРА ---
-                else:
-                    p_name_db = item.get('Patient Name', 'Без имени')
-                    date_created = item.get('Created At', '')[:10]
-                    summary = item.get('Short Summary', 'Нет данных')
-                    method = item.get('Biopsy Method', '-')
-                    gen = item.get('Gender', '?')
-                    icon = "👨" if gen == "Мужской" else "👩"
+                with st.container(border=True):
+                    col_h1, col_h2, col_h3 = st.columns([3, 2, 2])
+                    with col_h1: st.markdown(f"**{icon} {p_name_db}**")
+                    with col_h2: st.caption(f"📅 {date_created}")
+                    with col_h3: st.caption(f"🔬 {method}")
                     
-                    with st.container(border=True):
-                        col_h1, col_h2, col_h3 = st.columns([3, 2, 2])
-                        with col_h1: st.markdown(f"**{icon} {p_name_db}**")
-                        with col_h2: st.caption(f"📅 {date_created}")
-                        with col_h3: st.caption(f"🔬 {method}")
+                    st.divider()
+                    st.write(summary)
+                    
+                    with st.expander("📄 Полный текст и Действия"):
+                        st.write(item.get('AI Conclusion', ''))
+                        st.markdown("---")
                         
-                        st.divider()
-                        st.write(summary)
-                        
-                        with st.expander("📄 Полный текст и Действия"):
-                            st.write(item.get('AI Conclusion', ''))
-                            st.markdown("---")
-                            
-                            c_act1, c_act2 = st.columns(2)
-                            
-                            # Кнопка РЕДАКТИРОВАТЬ
-                            if c_act1.button("✏️ Редактировать", key=f"btn_edit_{rec_id}", use_container_width=True):
-                                st.session_state.edit_mode_id = rec_id
-                                st.rerun()
-                            
-                            # Кнопка ПЕЧАТЬ (PDF)
-                            if c_act2.button("🖨️ Печать (PDF)", key=f"btn_print_{rec_id}", use_container_width=True):
-                                with st.spinner("Генерация документа..."):
-                                    img_obj = None
-                                    if 'Image' in item and len(item['Image']) > 0:
-                                        img_url = item['Image'][0].get('url')
-                                        if img_url:
-                                            img_obj = get_image_from_url(img_url)
-                                    
-                                    p_data_pdf = {
-                                        'p_name': p_name_db,
-                                        'gender': gen,
-                                        'weight': item.get('Weight', 0),
-                                        'dob': item.get('Birth Date', '-'),
-                                        'anamnesis': item.get('Anamnesis', '-'),
-                                        'biopsy': method
-                                    }
-                                    
-                                    pdf_bytes = create_pdf(p_data_pdf, item.get('AI Conclusion', ''), img_obj)
-                                    
-                                    st.download_button(
-                                        label="📥 Скачать готовый PDF",
-                                        data=pdf_bytes,
-                                        file_name=f"Report_{p_name_db}.pdf",
-                                        mime="application/pdf",
-                                        key=f"dl_{rec_id}"
-                                    )
+                        # Кнопка ПЕЧАТЬ (PDF)
+                        if st.button("🖨️ Печать (PDF)", key=f"btn_print_{rec_id}", use_container_width=True):
+                            with st.spinner("Генерация документа..."):
+                                img_obj = None
+                                if 'Image' in item and len(item['Image']) > 0:
+                                    img_url = item['Image'][0].get('url')
+                                    if img_url:
+                                        img_obj = get_image_from_url(img_url)
+                                
+                                p_data_pdf = {
+                                    'p_name': p_name_db,
+                                    'gender': gen,
+                                    'weight': item.get('Weight', 0),
+                                    'dob': item.get('Birth Date', '-'),
+                                    'anamnesis': item.get('Anamnesis', '-'),
+                                    'biopsy': method
+                                }
+                                
+                                pdf_bytes = create_pdf(p_data_pdf, item.get('AI Conclusion', ''), img_obj)
+                                
+                                st.download_button(
+                                    label="📥 Скачать готовый PDF",
+                                    data=pdf_bytes,
+                                    file_name=f"Report_{p_name_db}.pdf",
+                                    mime="application/pdf",
+                                    key=f"dl_{rec_id}"
+                                )
         else:
             st.info("Архив пуст.")
