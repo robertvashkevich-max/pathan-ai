@@ -6,35 +6,26 @@ from fpdf import FPDF
 import tempfile
 from pyairtable import Api
 import time
+import requests
+from io import BytesIO
 
 # --- НАСТРОЙКА СТРАНИЦЫ ---
 st.set_page_config(page_title="PathanAI Pro", page_icon="🔬", layout="wide")
 
-# --- ИНИЦИАЛИЗАЦИЯ СОСТОЯНИЯ (Для очистки формы) ---
-if 'analysis_result' not in st.session_state:
-    st.session_state.analysis_result = None
-if 'analysis_pdf' not in st.session_state:
-    st.session_state.analysis_pdf = None
-if 'uploader_key' not in st.session_state:
-    st.session_state.uploader_key = 0
+# --- ИНИЦИАЛИЗАЦИЯ СОСТОЯНИЯ ---
+if 'analysis_result' not in st.session_state: st.session_state.analysis_result = None
+if 'analysis_pdf' not in st.session_state: st.session_state.analysis_pdf = None
+if 'uploader_key' not in st.session_state: st.session_state.uploader_key = 0
+if 'edit_mode_id' not in st.session_state: st.session_state.edit_mode_id = None
 
-# --- ФУНКЦИЯ СБРОСА (ОЧИСТКИ) ---
+# --- ФУНКЦИЯ СБРОСА ---
 def reset_analysis():
-    # Очищаем результаты
     st.session_state.analysis_result = None
     st.session_state.analysis_pdf = None
-    
-    # Сбрасываем поля ввода через Session State
     st.session_state["w_p_name"] = ""
     st.session_state["w_weight"] = 0.0
     st.session_state["w_anamnesis"] = ""
-    # Сбрасываем дату на дефолтную
     st.session_state["w_dob"] = datetime.date(1980, 1, 1)
-    # Сбрасываем селекты на первый вариант (индекс 0)
-    # (Streamlit сбрасывает selectbox, если удалить его ключ или перезагрузить, 
-    # но надежнее просто обновить интерфейс)
-    
-    # Трюк для очистки загрузчика файлов (меняем ему ключ)
     st.session_state.uploader_key += 1
 
 # --- ПОДКЛЮЧЕНИЕ КЛЮЧЕЙ ---
@@ -55,7 +46,7 @@ except Exception as e:
     st.error(f"⚠️ Ошибка настройки ключей: {e}")
     st.stop()
 
-# --- ФУНКЦИИ AIRTABLE ---
+# --- ФУНКЦИИ БАЗЫ ДАННЫХ ---
 
 def login_user(name, password):
     formula = f"{{Name}}='{name}'"
@@ -89,13 +80,23 @@ def save_analysis(patient_data, analysis_full, summary, image_file, user_id):
     }
     records_table.create(record_data)
 
+def update_record_data(record_id, updated_data):
+    # Обновление записи в Airtable
+    records_table.update(record_id, updated_data)
+
 def get_history_debug(user_id, show_all=False):
     all_records = records_table.all()
-    all_records.sort(key=lambda x: x['fields'].get('Created At', ''), reverse=True)
+    # Сортировка по времени создания (если есть поле Created At или системное createdTime)
+    all_records.sort(key=lambda x: x.get('createdTime', ''), reverse=True)
+    
     filtered_records = []
     
     for r in all_records:
         fields = r['fields']
+        # ВАЖНО: Добавляем ID самой записи внутрь словаря fields, чтобы потом к нему обращаться
+        fields['record_id'] = r['id']
+        fields['created_time'] = r.get('createdTime', '')
+        
         is_my_record = False
         if 'Doctor' in fields and user_id in fields['Doctor']:
             is_my_record = True
@@ -108,6 +109,16 @@ def get_history_debug(user_id, show_all=False):
             filtered_records.append(fields)
             
     return filtered_records
+
+# --- ФУНКЦИИ PDF И КАРТИНОК ---
+
+def get_image_from_url(url):
+    try:
+        response = requests.get(url)
+        img = Image.open(BytesIO(response.content))
+        return img
+    except:
+        return None
 
 def create_pdf(patient_data, analysis_text, image_obj):
     pdf = FPDF()
@@ -134,13 +145,18 @@ def create_pdf(patient_data, analysis_text, image_obj):
             if image_obj.mode == 'RGBA': image_obj = image_obj.convert('RGB')
             with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
                 image_obj.save(tmp.name)
-                pdf.image(tmp.name, x=55, w=100) 
+                # Центрируем картинку
+                x_pos = (210 - 100) / 2
+                pdf.image(tmp.name, x=x_pos, w=100) 
         except: pass
     
     pdf.ln(5)
-    pdf.cell(0, 10, 'ЗАКЛЮЧЕНИЕ ИИ:', ln=True, fill=True)
+    pdf.cell(0, 10, 'ЗАКЛЮЧЕНИЕ:', ln=True, fill=True)
     pdf.ln(2)
-    pdf.multi_cell(0, 6, analysis_text.replace('**', '').replace('* ', '- '))
+    # Очистка текста от markdown символов
+    clean_text = analysis_text.replace('**', '').replace('##', '').replace('* ', '- ')
+    pdf.multi_cell(0, 6, clean_text)
+    
     return pdf.output(dest='S').encode('latin-1')
 
 
@@ -195,10 +211,8 @@ else:
 
     # === ВКЛАДКА 1: НОВЫЙ АНАЛИЗ ===
     with tab_new:
-        # Если анализ еще не проведен или мы нажали "Новый анализ", показываем форму
         with st.container(border=True):
             st.subheader("Данные пациента")
-            # Добавили ключи (key=...) ко всем полям, чтобы уметь их очищать
             p_name = st.text_input("ФИО Пациента", placeholder="Иванов И.И.", key="w_p_name")
             
             c1, c2, c3 = st.columns(3)
@@ -214,14 +228,12 @@ else:
         
         with st.container(border=True):
             st.subheader("Загрузка материала")
-            # Ключ загрузчика динамический, чтобы его можно было "пересоздать" для очистки
             upl = st.file_uploader("Загрузить гистологический снимок", type=["jpg", "png", "jpeg"], key=f"upl_{st.session_state.uploader_key}")
             
             if upl:
                 img = Image.open(upl)
                 st.image(img, width=400)
                 
-                # Кнопка Запуска
                 if st.button("🚀 Запустить анализ", type="primary", use_container_width=True):
                     if not p_name: 
                         st.warning("Введите ФИО пациента!")
@@ -237,5 +249,148 @@ else:
                                 
                                 p_data = {"p_name": p_name, "gender": gender, "weight": weight, "dob": dob, "anamnesis": anamnesis, "biopsy": biopsy}
                                 
-                                # Сохраняем результат в Session State, чтобы он не исчез
                                 st.session_state.analysis_result = txt
+                                save_analysis(p_data, txt, summ, img, st.session_state.user_id)
+                                
+                                pdf = create_pdf(p_data, txt, img)
+                                st.session_state.analysis_pdf = pdf
+                                
+                                st.success("Готово! Результат сохранен.")
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"Ошибка: {e}")
+
+        if st.session_state.analysis_result:
+            st.markdown("---")
+            st.subheader("📋 Результат анализа")
+            st.write(st.session_state.analysis_result)
+            
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
+                if st.session_state.analysis_pdf:
+                    st.download_button("📥 Скачать PDF отчет", st.session_state.analysis_pdf, "report.pdf", "application/pdf", use_container_width=True)
+            with col_d2:
+                st.button("✨ Создать новый анализ", on_click=reset_analysis, use_container_width=True, type="secondary")
+
+    # === ВКЛАДКА 2: ИСТОРИЯ И РЕДАКТИРОВАНИЕ ===
+    with tab_archive:
+        c_head, c_check = st.columns([3, 2])
+        with c_head: st.subheader("История анализов")
+        with c_check: show_debug = st.checkbox("🕵️‍♂️ Показать ВСЕ записи (Debug)")
+        
+        if st.button("🔄 Обновить список"): st.rerun()
+            
+        history = get_history_debug(st.session_state.user_id, show_all=show_debug)
+        
+        if history:
+            for item in history:
+                rec_id = item.get('record_id')
+                
+                # РЕЖИМ РЕДАКТИРОВАНИЯ ДЛЯ КОНКРЕТНОЙ КАРТОЧКИ
+                if st.session_state.edit_mode_id == rec_id:
+                    with st.container(border=True):
+                        st.info(f"✏️ Редактирование записи: {item.get('Patient Name')}")
+                        with st.form(key=f"edit_form_{rec_id}"):
+                            new_name = st.text_input("ФИО", value=item.get('Patient Name', ''))
+                            c_e1, c_e2, c_e3 = st.columns(3)
+                            new_gender = c_e1.selectbox("Пол", ["Мужской", "Женский"], index=0 if item.get('Gender')=="Мужской" else 1)
+                            new_biopsy = c_e2.selectbox("Метод", ["Мазок", "Пункция", "Эксцизия", "Резекция"], index=0) # Упрощенно index=0, можно доработать
+                            new_weight = c_e3.number_input("Вес", value=float(item.get('Weight', 0.0)))
+                            
+                            new_anamnesis = st.text_area("Анамнез", value=item.get('Anamnesis', ''))
+                            new_full_text = st.text_area("Полный текст заключения (AI)", value=item.get('AI Conclusion', ''), height=200)
+                            
+                            col_save, col_cancel = st.columns(2)
+                            saved = col_save.form_submit_button("💾 Сохранить изменения", type="primary", use_container_width=True)
+                            cancelled = col_cancel.form_submit_button("❌ Отмена", use_container_width=True)
+                            
+                            if saved:
+                                # Обновляем Airtable
+                                update_data = {
+                                    "Patient Name": new_name,
+                                    "Gender": new_gender,
+                                    "Biopsy Method": new_biopsy,
+                                    "Weight": new_weight,
+                                    "Anamnesis": new_anamnesis,
+                                    "AI Conclusion": new_full_text,
+                                    "Short Summary": new_full_text.split("ВЫВОД")[-1][:200] if "ВЫВОД" in new_full_text else "Изменено вручную"
+                                }
+                                update_record_data(rec_id, update_data)
+                                st.session_state.edit_mode_id = None
+                                st.success("Обновлено!")
+                                time.sleep(0.5)
+                                st.rerun()
+                            
+                            if cancelled:
+                                st.session_state.edit_mode_id = None
+                                st.rerun()
+
+                # ОБЫЧНЫЙ РЕЖИМ ПРОСМОТРА
+                else:
+                    p_name_db = item.get('Patient Name', 'Без имени')
+                    date_created = item.get('Created At', '')[:10]
+                    summary = item.get('Short Summary', 'Нет данных')
+                    method = item.get('Biopsy Method', '-')
+                    gen = item.get('Gender', '?')
+                    icon = "👨" if gen == "Мужской" else "👩"
+                    
+                    debug_info = ""
+                    if show_debug:
+                        debug_info = "✅ МОЯ" if item.get('_debug_is_mine') else f"❌ ЧУЖАЯ (Dr: {item.get('_debug_doctor_field')})"
+                    
+                    with st.container(border=True):
+                        if show_debug: st.caption(debug_info)
+                        
+                        col_h1, col_h2, col_h3 = st.columns([3, 2, 2])
+                        with col_h1: st.markdown(f"**{icon} {p_name_db}**")
+                        with col_h2: st.caption(f"📅 {date_created}")
+                        with col_h3: st.caption(f"🔬 {method}")
+                        
+                        st.divider()
+                        st.write(summary)
+                        
+                        with st.expander("📄 Полный текст и Действия"):
+                            st.write(item.get('AI Conclusion', ''))
+                            
+                            st.markdown("---")
+                            c_act1, c_act2 = st.columns(2)
+                            
+                            # Кнопка РЕДАКТИРОВАТЬ
+                            if c_act1.button("✏️ Редактировать", key=f"btn_edit_{rec_id}", use_container_width=True):
+                                st.session_state.edit_mode_id = rec_id
+                                st.rerun()
+                            
+                            # Кнопка ПЕЧАТЬ (Генерация PDF на лету)
+                            if c_act2.button("🖨️ Печать (PDF)", key=f"btn_print_{rec_id}", use_container_width=True):
+                                with st.spinner("Генерация документа..."):
+                                    # 1. Пытаемся достать картинку из Airtable (она там в списке Attachments)
+                                    img_obj = None
+                                    if 'Image' in item and len(item['Image']) > 0:
+                                        img_url = item['Image'][0].get('url')
+                                        if img_url:
+                                            img_obj = get_image_from_url(img_url)
+                                    
+                                    # 2. Собираем данные
+                                    p_data_pdf = {
+                                        'p_name': p_name_db,
+                                        'gender': gen,
+                                        'weight': item.get('Weight', 0),
+                                        'dob': item.get('Birth Date', '-'),
+                                        'anamnesis': item.get('Anamnesis', '-'),
+                                        'biopsy': method
+                                    }
+                                    
+                                    # 3. Создаем PDF
+                                    pdf_bytes = create_pdf(p_data_pdf, item.get('AI Conclusion', ''), img_obj)
+                                    
+                                    # 4. Предлагаем скачать (используем уникальный ключ, чтобы кнопка не пропадала сразу)
+                                    st.download_button(
+                                        label="📥 Скачать готовый PDF",
+                                        data=pdf_bytes,
+                                        file_name=f"Report_{p_name_db}.pdf",
+                                        mime="application/pdf",
+                                        key=f"dl_{rec_id}"
+                                    )
+        else:
+            st.info("Архив пуст.")
