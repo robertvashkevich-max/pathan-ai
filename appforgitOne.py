@@ -6,7 +6,6 @@ import datetime
 st.set_page_config(page_title="PathanAI", page_icon="🔬")
 
 # --- БЕЗОПАСНОЕ ПОДКЛЮЧЕНИЕ КЛЮЧА ---
-# Программа ищет ключ в настройках сервера (Secrets)
 try:
     api_key = st.secrets["GEMINI_API_KEY"]
 except (FileNotFoundError, KeyError):
@@ -56,7 +55,13 @@ if uploaded_file:
     with col2:
         weight = st.number_input("Вес (кг)", min_value=0.0, step=0.1, format="%.1f")
     with col3:
-        dob = st.date_input("Дата рождения", min_value=datetime.date(1990, 1, 1))
+        # ИСПРАВЛЕНИЕ ЗДЕСЬ: меняем 1990 на 1900
+        dob = st.date_input(
+            "Дата рождения", 
+            min_value=datetime.date(1900, 1, 1),
+            max_value=datetime.date.today(),
+            value=datetime.date(1980, 1, 1) # По умолчанию ставим 1980 год для удобства
+        )
 
     col4, col5 = st.columns(2)
     with col4:
