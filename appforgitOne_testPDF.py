@@ -192,5 +192,27 @@ else:
             else:
                 with st.spinner("ИИ анализирует снимок..."):
                     try:
-                        # ИСПОЛЬЗУЕМ СТАБИЛЬНУЮ МОДЕЛЬ ИЗ ВАШЕГО СПИСКА
+                        # ИСПОЛЬЗУЕМ СТАБИЛЬНУЮ МОДЕЛЬ
                         model = genai.GenerativeModel('gemini-flash-latest')
+                        
+                        prompt = f"Роль: Патологоанатом. Пациент: {p_name}, {gender}, {weight}, {dob}. Анамнез: {anamnesis}. Опиши гистологию, дай заключение и КРАТКИЙ ВЫВОД."
+                        
+                        res = model.generate_content([prompt, img])
+                        txt = res.text
+                        
+                        # Вывод
+                        summ = txt.split("ВЫВОД")[-1][:200] if "ВЫВОД" in txt else "См. полный отчет"
+                        st.markdown("### Результат")
+                        st.write(txt)
+                        
+                        # Сохранение
+                        save_analysis({"p_name": p_name, "gender": gender, "weight": weight, "dob": dob, "anamnesis": anamnesis}, txt, summ, img, st.session_state.user_id)
+                        
+                        # PDF
+                        pdf = create_pdf({"p_name": p_name, "gender": gender, "weight": weight, "dob": dob, "anamnesis": anamnesis}, txt, img)
+                        st.download_button("Скачать PDF", pdf, "report.pdf", "application/pdf")
+                        
+                        st.success("✅ Анализ сохранен в базу!")
+                        
+                    except Exception as e:
+                        st.error(f"Ошибка API: {e}")
