@@ -12,21 +12,21 @@ from io import BytesIO
 # --- НАСТРОЙКА СТРАНИЦЫ ---
 st.set_page_config(page_title="PathanAI Pro", page_icon="🔬", layout="wide")
 
-# --- CSS: СКРЫВАЕМ ВСЕ ЛИШНЕЕ (MANAGE APP, МЕНЮ, ОШИБКИ) ---
+# --- CSS: СКРЫВАЕМ ВСЕ ЛИШНЕЕ ---
 st.markdown("""
     <style>
-    /* 1. Скрываем красные сообщения об ошибках */
+    /* Скрываем ошибки */
     .stException { display: none !important; }
     div[data-testid="stNotification"] { display: none !important; }
     
-    /* 2. Скрываем меню (три полоски) и верхнюю полосу */
+    /* Скрываем меню и хедер */
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     
-    /* 3. Скрываем футер (где Manage App и Made with Streamlit) */
+    /* Скрываем футер */
     footer {visibility: hidden;}
     
-    /* 4. Дополнительно скрываем кнопки деплоя и тулбары */
+    /* Скрываем кнопку Deploy */
     .stDeployButton {display:none;}
     [data-testid="stToolbar"] {visibility: hidden !important;}
     [data-testid="stDecoration"] {display:none;}
@@ -49,7 +49,7 @@ def reset_analysis():
     st.session_state["w_dob"] = datetime.date(1980, 1, 1)
     st.session_state.uploader_key += 1
 
-# --- ПОДКЛЮЧЕНИЕ КЛЮЧЕЙ (ТИХИЙ РЕЖИМ) ---
+# --- ПОДКЛЮЧЕНИЕ КЛЮЧЕЙ ---
 try:
     if "GEMINI_API_KEY" in st.secrets:
         gemini_key = st.secrets["GEMINI_API_KEY"]
@@ -181,9 +181,12 @@ if st.session_state.user_id is None:
     c1, c2 = st.columns([1, 2])
     with c1:
         tab1, tab2 = st.tabs(["Вход", "Регистрация"])
+        
+        # Вкладка ВХОД
         with tab1:
-            name = st.text_input("Имя Фамилия")
-            pwd = st.text_input("Пароль", type="password")
+            # Добавил key, чтобы избежать конфликта имен
+            name = st.text_input("Имя Фамилия", key="login_name")
+            pwd = st.text_input("Пароль", type="password", key="login_pass")
             if st.button("Войти", use_container_width=True):
                 u = login_user(name, pwd)
                 if u:
@@ -191,10 +194,14 @@ if st.session_state.user_id is None:
                     st.session_state.user_name = u['fields'].get('Name')
                     st.rerun()
                 else: st.error("Ошибка входа")
+        
+        # Вкладка РЕГИСТРАЦИЯ (Исправлено)
         with tab2:
-            n = st.text_input("Ваше Имя")
-            p = st.text_input("Пароль", type="password")
-            e = st.text_input("Email")
+            # Добавил key, чтобы поля не исчезали
+            n = st.text_input("Ваше Имя", key="reg_name")
+            p = st.text_input("Придумайте Пароль", type="password", key="reg_pass")
+            e = st.text_input("Email", key="reg_email")
+            
             if st.button("Создать аккаунт", use_container_width=True):
                 if register_user(n, p, e): st.success("Готово! Войдите.")
                 else: st.error("Имя занято")
