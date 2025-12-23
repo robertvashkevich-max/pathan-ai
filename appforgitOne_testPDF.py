@@ -22,12 +22,10 @@ if 'edit_mode_id' not in st.session_state: st.session_state.edit_mode_id = None
 def reset_analysis():
     st.session_state.analysis_result = None
     st.session_state.analysis_pdf = None
-    # Сбрасываем значения виджетов через session_state
     st.session_state["w_p_name"] = ""
     st.session_state["w_weight"] = 0.0
     st.session_state["w_anamnesis"] = ""
     st.session_state["w_dob"] = datetime.date(1980, 1, 1)
-    # Меняем ключ загрузчика, чтобы очистить файл
     st.session_state.uploader_key += 1
 
 # --- ПОДКЛЮЧЕНИЕ КЛЮЧЕЙ ---
@@ -83,34 +81,22 @@ def save_analysis(patient_data, analysis_full, summary, image_file, user_id):
     records_table.create(record_data)
 
 def update_record_data(record_id, updated_data):
-    # Обновление записи в Airtable
     records_table.update(record_id, updated_data)
 
-def get_history_debug(user_id, show_all=False):
+def get_all_history_records():
+    # Загружаем ВСЕ записи без фильтрации по врачу
     all_records = records_table.all()
-    # Сортировка по времени создания
+    # Сортировка: новые сверху
     all_records.sort(key=lambda x: x.get('createdTime', ''), reverse=True)
     
-    filtered_records = []
-    
+    processed_records = []
     for r in all_records:
         fields = r['fields']
-        # ВАЖНО: Добавляем ID самой записи внутрь словаря fields
-        fields['record_id'] = r['id']
+        fields['record_id'] = r['id'] # Сохраняем ID для редактирования
         fields['created_time'] = r.get('createdTime', '')
-        
-        is_my_record = False
-        if 'Doctor' in fields and user_id in fields['Doctor']:
-            is_my_record = True
-        
-        if show_all:
-            fields['_debug_is_mine'] = is_my_record
-            fields['_debug_doctor_field'] = fields.get('Doctor', 'ПУСТО')
-            filtered_records.append(fields)
-        elif is_my_record:
-            filtered_records.append(fields)
+        processed_records.append(fields)
             
-    return filtered_records
+    return processed_records
 
 # --- ФУНКЦИИ PDF И КАРТИНОК ---
 
@@ -119,8 +105,7 @@ def get_image_from_url(url):
         response = requests.get(url)
         img = Image.open(BytesIO(response.content))
         return img
-    except:
-        return None
+    except: return None
 
 def create_pdf(patient_data, analysis_text, image_obj):
     pdf = FPDF()
@@ -147,7 +132,6 @@ def create_pdf(patient_data, analysis_text, image_obj):
             if image_obj.mode == 'RGBA': image_obj = image_obj.convert('RGB')
             with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
                 image_obj.save(tmp.name)
-                # Центрируем картинку
                 x_pos = (210 - 100) / 2
                 pdf.image(tmp.name, x=x_pos, w=100) 
         except: pass
@@ -155,7 +139,6 @@ def create_pdf(patient_data, analysis_text, image_obj):
     pdf.ln(5)
     pdf.cell(0, 10, 'ЗАКЛЮЧЕНИЕ:', ln=True, fill=True)
     pdf.ln(2)
-    # Очистка текста от markdown символов
     clean_text = analysis_text.replace('**', '').replace('##', '').replace('* ', '- ')
     pdf.multi_cell(0, 6, clean_text)
     
@@ -275,21 +258,22 @@ else:
             with col_d2:
                 st.button("✨ Создать новый анализ", on_click=reset_analysis, use_container_width=True, type="secondary")
 
-    # === ВКЛАДКА 2: ИСТОРИЯ И РЕДАКТИРОВАНИЕ ===
+    # === ВКЛАДКА 2: ОБЩИЙ АРХИВ ===
     with tab_archive:
-        c_head, c_check = st.columns([3, 2])
-        with c_head: st.subheader("История анализов")
-        with c_check: show_debug = st.checkbox("🕵️‍♂️ Показать ВСЕ записи (Debug)")
-        
-        if st.button("🔄 Обновить список"): st.rerun()
+        col_head, col_refresh = st.columns([4, 1])
+        with col_head:
+            st.subheader("🗂 Общая база пациентов")
+        with col_refresh:
+            if st.button("🔄 Обновить", use_container_width=True):
+                st.rerun()
             
-        history = get_history_debug(st.session_state.user_id, show_all=show_debug)
+        history = get_all_history_records()
         
         if history:
             for item in history:
                 rec_id = item.get('record_id')
                 
-                # РЕЖИМ РЕДАКТИРОВАНИЯ
+                # --- РЕЖИМ РЕДАКТИРОВАНИЯ ---
                 if st.session_state.edit_mode_id == rec_id:
                     with st.container(border=True):
                         st.info(f"✏️ Редактирование записи: {item.get('Patient Name')}")
@@ -297,7 +281,7 @@ else:
                             new_name = st.text_input("ФИО", value=item.get('Patient Name', ''))
                             
                             c_e1, c_e2, c_e3 = st.columns(3)
-                            # Аккуратная обработка значений селекторов
+                            # Настройка текущих значений
                             curr_gender = item.get('Gender', 'Мужской')
                             gender_idx = 0 if curr_gender == "Мужской" else 1
                             
@@ -328,7 +312,7 @@ else:
                                 }
                                 update_record_data(rec_id, update_data)
                                 st.session_state.edit_mode_id = None
-                                st.success("Обновлено!")
+                                st.success("Запись обновлена!")
                                 time.sleep(0.5)
                                 st.rerun()
                             
@@ -336,7 +320,7 @@ else:
                                 st.session_state.edit_mode_id = None
                                 st.rerun()
 
-                # ОБЫЧНЫЙ РЕЖИМ ПРОСМОТРА
+                # --- РЕЖИМ ПРОСМОТРА ---
                 else:
                     p_name_db = item.get('Patient Name', 'Без имени')
                     date_created = item.get('Created At', '')[:10]
@@ -345,13 +329,7 @@ else:
                     gen = item.get('Gender', '?')
                     icon = "👨" if gen == "Мужской" else "👩"
                     
-                    debug_info = ""
-                    if show_debug:
-                        debug_info = "✅ МОЯ" if item.get('_debug_is_mine') else f"❌ ЧУЖАЯ (Dr: {item.get('_debug_doctor_field')})"
-                    
                     with st.container(border=True):
-                        if show_debug: st.caption(debug_info)
-                        
                         col_h1, col_h2, col_h3 = st.columns([3, 2, 2])
                         with col_h1: st.markdown(f"**{icon} {p_name_db}**")
                         with col_h2: st.caption(f"📅 {date_created}")
