@@ -12,12 +12,17 @@ from io import BytesIO
 # --- НАСТРОЙКА СТРАНИЦЫ ---
 st.set_page_config(page_title="PathanAI Pro", page_icon="🔬", layout="wide")
 
-# --- СКРЫТИЕ ВИЗУАЛЬНЫХ ОШИБОК (CSS) ---
-# Этот блок скрывает красные окна с ошибками (Traceback), если они не влияют на работу
+# --- CSS: СКРЫВАЕМ ОШИБКИ И МЕНЮ STREAMLIT ---
 st.markdown("""
     <style>
+    /* Скрываем красные сообщения об ошибках */
     .stException { display: none !important; }
     div[data-testid="stNotification"] { display: none !important; }
+    
+    /* Скрываем меню справа сверху, хедер и футер */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -38,7 +43,6 @@ def reset_analysis():
 
 # --- ПОДКЛЮЧЕНИЕ КЛЮЧЕЙ (ТИХИЙ РЕЖИМ) ---
 try:
-    # Пытаемся загрузить ключи, но если ошибка не критична — не выводим её на экран
     if "GEMINI_API_KEY" in st.secrets:
         gemini_key = st.secrets["GEMINI_API_KEY"]
         genai.configure(api_key=gemini_key)
@@ -52,15 +56,12 @@ try:
         api = Api(airtable_token)
         users_table = api.table(base_id, table_users_name)
         records_table = api.table(base_id, table_records_name)
-    
 except Exception:
-    # Просто молчим, если что-то пошло не так, но программа работает
     pass
 
 # --- ФУНКЦИИ БАЗЫ ДАННЫХ ---
 
 def login_user(name, password):
-    # Дополнительная защита от ошибок при входе
     if not name or not password: return None
     try:
         formula = f"{{Name}}='{name}'"
@@ -69,8 +70,7 @@ def login_user(name, password):
             user_record = matches[0]
             if user_record['fields'].get('Password') == password:
                 return user_record
-    except:
-        return None
+    except: return None
     return None
 
 def register_user(name, password, email):
@@ -80,8 +80,7 @@ def register_user(name, password, email):
         if matches: return False
         users_table.create({"Name": name, "Password": password, "Email": email, "Role": "Doctor"})
         return True
-    except:
-        return False
+    except: return False
 
 def save_analysis(patient_data, analysis_full, summary, image_file, user_id):
     try:
@@ -103,7 +102,6 @@ def get_all_history_records():
     try:
         all_records = records_table.all()
         all_records.sort(key=lambda x: x.get('createdTime', ''), reverse=True)
-        
         processed_records = []
         for r in all_records:
             fields = r['fields']
@@ -111,8 +109,7 @@ def get_all_history_records():
             fields['created_time'] = r.get('createdTime', '')
             processed_records.append(fields)
         return processed_records
-    except:
-        return []
+    except: return []
 
 # --- ФУНКЦИИ PDF И КАРТИНОК ---
 
