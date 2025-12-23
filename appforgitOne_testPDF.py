@@ -12,17 +12,25 @@ from io import BytesIO
 # --- НАСТРОЙКА СТРАНИЦЫ ---
 st.set_page_config(page_title="PathanAI Pro", page_icon="🔬", layout="wide")
 
-# --- CSS: СКРЫВАЕМ ОШИБКИ И МЕНЮ STREAMLIT ---
+# --- CSS: СКРЫВАЕМ ВСЕ ЛИШНЕЕ (MANAGE APP, МЕНЮ, ОШИБКИ) ---
 st.markdown("""
     <style>
-    /* Скрываем красные сообщения об ошибках */
+    /* 1. Скрываем красные сообщения об ошибках */
     .stException { display: none !important; }
     div[data-testid="stNotification"] { display: none !important; }
     
-    /* Скрываем меню справа сверху, хедер и футер */
+    /* 2. Скрываем меню (три полоски) и верхнюю полосу */
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
+    
+    /* 3. Скрываем футер (где Manage App и Made with Streamlit) */
     footer {visibility: hidden;}
+    
+    /* 4. Дополнительно скрываем кнопки деплоя и тулбары */
+    .stDeployButton {display:none;}
+    [data-testid="stToolbar"] {visibility: hidden !important;}
+    [data-testid="stDecoration"] {display:none;}
+    [data-testid="stStatusWidget"] {visibility: hidden;}
     </style>
 """, unsafe_allow_html=True)
 
