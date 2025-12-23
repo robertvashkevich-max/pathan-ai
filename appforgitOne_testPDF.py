@@ -12,7 +12,7 @@ from io import BytesIO
 # --- НАСТРОЙКА СТРАНИЦЫ ---
 st.set_page_config(page_title="PathanAI Pro", page_icon="🔬", layout="wide")
 
-# --- СЛОВАРЬ ПЕРЕВОДОВ ---
+# --- СЛОВАРЬ ПЕРЕВОДОВ (TR) ---
 TR = {
     "login_title": {"RU": "🔐 PathanAI: Вход", "EN": "🔐 PathanAI: Login"},
     "tab_login": {"RU": "Вход", "EN": "Login"},
@@ -27,13 +27,10 @@ TR = {
     "btn_register": {"RU": "Создать аккаунт", "EN": "Create Account"},
     "success_reg": {"RU": "Готово! Войдите.", "EN": "Success! Please login."},
     "err_name_taken": {"RU": "Имя занято", "EN": "Name already taken"},
-    
     "app_title": {"RU": "🔬 PathanAI: Рабочее место", "EN": "🔬 PathanAI: Workspace"},
     "btn_logout": {"RU": "Выйти", "EN": "Logout"},
-    
     "tab_new_analysis": {"RU": "🧬 Новый анализ", "EN": "🧬 New Analysis"},
     "tab_archive": {"RU": "🗂 Общая база", "EN": "🗂 Patient Database"},
-    
     "sec_patient": {"RU": "Данные пациента", "EN": "Patient Data"},
     "in_p_name": {"RU": "ФИО Пациента", "EN": "Patient Name"},
     "ph_p_name": {"RU": "Иванов И.И.", "EN": "John Doe"},
@@ -44,7 +41,6 @@ TR = {
     "in_dob": {"RU": "Дата рождения", "EN": "Date of Birth"},
     "in_weight": {"RU": "Вес (кг)", "EN": "Weight (kg)"},
     "in_anamnesis": {"RU": "Анамнез / Описание", "EN": "Anamnesis / Description"},
-    
     "sec_upload": {"RU": "Загрузка материала", "EN": "Upload Image"},
     "upl_label": {"RU": "Загрузить снимок", "EN": "Upload histology image"},
     "btn_run": {"RU": "🚀 Запустить анализ", "EN": "🚀 Run Analysis"},
@@ -52,17 +48,14 @@ TR = {
     "spinner": {"RU": "Анализ...", "EN": "Analyzing..."},
     "success_save": {"RU": "Готово! Результат сохранен.", "EN": "Done! Result saved."},
     "err_api": {"RU": "Ошибка", "EN": "Error"},
-    
     "res_title": {"RU": "📋 Результат анализа", "EN": "📋 Analysis Result"},
     "btn_download": {"RU": "📥 Скачать PDF отчет", "EN": "📥 Download PDF Report"},
     "btn_reset": {"RU": "✨ Новый анализ", "EN": "✨ New Analysis"},
-    
     "arch_title": {"RU": "🗂 Общая база пациентов", "EN": "🗂 All Patient Records"},
     "btn_refresh": {"RU": "🔄 Обновить", "EN": "🔄 Refresh"},
     "arch_empty": {"RU": "Архив пуст.", "EN": "Database is empty."},
     "exp_full": {"RU": "📄 Полный текст", "EN": "📄 Full Report"},
     "btn_print": {"RU": "🖨️ Печать PDF", "EN": "🖨️ Print PDF"},
-    
     "pdf_title": {"RU": "PathanAI: Медицинское заключение", "EN": "PathanAI: Medical Report"},
     "pdf_data": {"RU": "ДАННЫЕ:", "EN": "PATIENT DATA:"},
     "pdf_concl": {"RU": "ЗАКЛЮЧЕНИЕ:", "EN": "CONCLUSION:"},
@@ -74,7 +67,7 @@ TR = {
     "pdf_anam": {"RU": "Анамнез", "EN": "History"}
 }
 
-# --- CSS: СКРЫВАЕМ ЛИШНЕЕ ---
+# --- CSS: СКРЫТИЕ ЭЛЕМЕНТОВ ---
 st.markdown("""
     <style>
     .stException { display: none !important; }
@@ -97,12 +90,12 @@ if 'uploader_key' not in st.session_state: st.session_state.uploader_key = 0
 if 'user_id' not in st.session_state: st.session_state.user_id = None
 if 'user_name' not in st.session_state: st.session_state.user_name = None
 
-# --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ДЛЯ БАЗЫ ---
+# Глобальные переменные для API
 api = None
 users_table = None
 records_table = None
 
-# Функция переключения языка
+# --- ФУНКЦИИ ЯЗЫКА ---
 def toggle_language():
     if st.session_state.language == 'RU':
         st.session_state.language = 'EN'
@@ -110,12 +103,16 @@ def toggle_language():
         st.session_state.language = 'RU'
 
 def t(key):
-    return TR[key][st.session_state.language]
+    # Безопасное получение перевода
+    if key in TR:
+        return TR[key][st.session_state.language]
+    return key
 
 # --- ПОДКЛЮЧЕНИЕ КЛЮЧЕЙ ---
 try:
     if "GEMINI_API_KEY" in st.secrets:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    
     if "airtable" in st.secrets:
         api = Api(st.secrets["airtable"]["API_TOKEN"])
         base_id = st.secrets["airtable"]["BASE_ID"]
@@ -123,7 +120,7 @@ try:
         records_table = api.table(base_id, st.secrets["airtable"]["TABLE_RECORDS"])
 except Exception: pass
 
-# --- ФУНКЦИИ БАЗЫ ДАННЫХ ---
+# --- ФУНКЦИИ ЛОГИКИ ---
 def login_user(name, password):
     if not name or not password or not users_table: return None
     try:
@@ -163,28 +160,19 @@ def save_analysis(patient_data, analysis_full, summary, image_file, user_id):
     except: pass
 
 def get_all_history_records():
-    # Эта функция исправлена для надежной загрузки
     if not records_table: return []
     try:
         all_records = records_table.all()
-        
-        # Безопасная сортировка
-        # Используем системное время createdTime, если оно есть, иначе пустую строку
-        # чтобы sort не падал с ошибкой
         all_records.sort(key=lambda x: x.get('createdTime', ''), reverse=True)
-        
         processed = []
         for r in all_records:
             fields = r.get('fields', {})
             fields['record_id'] = r.get('id')
             fields['created_time'] = r.get('createdTime', '')
             processed.append(fields)
-            
         return processed
-    except:
-        return []
+    except: return []
 
-# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 def reset_analysis():
     st.session_state.analysis_result = None
     st.session_state.analysis_pdf = None
@@ -211,7 +199,6 @@ def create_pdf(patient_data, analysis_text, image_obj, lang_code):
     pdf.set_fill_color(240, 240, 240)
     pdf.set_font('DejaVu', '', 12)
     pdf.cell(0, 10, pdf_t("pdf_data"), ln=True, fill=True)
-    
     text = f"{pdf_t('pdf_pat')}: {patient_data['p_name']}\n{pdf_t('pdf_gen')}: {patient_data['gender']} | {pdf_t('pdf_meth')}: {patient_data['biopsy']}\n{pdf_t('pdf_w')}: {patient_data['weight']} | {pdf_t('pdf_dob')}: {patient_data['dob']}\n{pdf_t('pdf_anam')}: {patient_data['anamnesis']}"
     pdf.multi_cell(0, 8, text)
     pdf.ln(5)
@@ -228,6 +215,7 @@ def create_pdf(patient_data, analysis_text, image_obj, lang_code):
     pdf.multi_cell(0, 6, analysis_text.replace('**', '').replace('##', '').replace('* ', '- '))
     return pdf.output(dest='S').encode('latin-1')
 
+# Авто-вход
 def try_auto_login():
     query_params = st.query_params
     uid_in_url = query_params.get("uid", None)
@@ -236,7 +224,6 @@ def try_auto_login():
         if user_rec:
             st.session_state.user_id = user_rec['id']
             st.session_state.user_name = user_rec['fields'].get('Name')
-
 try_auto_login()
 
 # ==========================================
@@ -244,6 +231,7 @@ try_auto_login()
 # ==========================================
 
 if st.session_state.user_id is None:
+    # Шапка Входа
     col_t1, col_t2 = st.columns([5, 1])
     with col_t1: st.title(t("login_title"))
     with col_t2: 
@@ -272,6 +260,7 @@ if st.session_state.user_id is None:
                 else: st.error(t("err_name_taken"))
 
 else:
+    # Шапка Приложения
     c_logo, c_user, c_lang = st.columns([5, 2, 1])
     with c_logo: st.title(t("app_title"))
     with c_user:
@@ -284,10 +273,9 @@ else:
         if st.button("🇬🇧/🇷🇺", key="lang_main"): toggle_language(); st.rerun()
 
     st.markdown("---")
-
     tab_new, tab_archive = st.tabs([t("tab_new_analysis"), t("tab_archive")])
 
-    # Вкладка 1: Новый анализ
+    # Вкладка 1
     with tab_new:
         with st.container(border=True):
             st.subheader(t("sec_patient"))
@@ -314,4 +302,67 @@ else:
                             try:
                                 model = genai.GenerativeModel('gemini-flash-latest')
                                 if st.session_state.language == 'RU':
-                                    prompt = f"Роль
+                                    prompt = f"Роль: Патологоанатом. Пациент: {p_name}, {gender}, {weight}, {dob}. Метод: {biopsy}. Анамнез: {anamnesis}. Опиши гистологию, дай заключение и КРАТКИЙ ВЫВОД."
+                                else:
+                                    prompt = f"Role: Pathologist. Patient: {p_name}, {gender}, {weight}, {dob}. Method: {biopsy}. History: {anamnesis}. Describe histology, provide conclusion and SHORT SUMMARY."
+
+                                res = model.generate_content([prompt, img])
+                                txt = res.text
+                                separator = "ВЫВОД" if "ВЫВОД" in txt else ("SUMMARY" if "SUMMARY" in txt else None)
+                                summ = txt.split(separator)[-1][:200] if separator else "See full report"
+                                
+                                p_data = {"p_name": p_name, "gender": gender, "weight": weight, "dob": dob, "anamnesis": anamnesis, "biopsy": biopsy}
+                                st.session_state.analysis_result = txt
+                                save_analysis(p_data, txt, summ, img, st.session_state.user_id)
+                                st.session_state.analysis_pdf = create_pdf(p_data, txt, img, st.session_state.language)
+                                st.success(t("success_save")); st.rerun()
+                            except Exception as e: st.error(f"{t('err_api')}: {e}")
+
+        if st.session_state.analysis_result:
+            st.markdown("---"); st.subheader(t("res_title"))
+            st.write(st.session_state.analysis_result)
+            c_d1, c_d2 = st.columns(2)
+            with c_d1:
+                if st.session_state.analysis_pdf:
+                    st.download_button(t("btn_download"), st.session_state.analysis_pdf, "report.pdf", "application/pdf", use_container_width=True)
+            with c_d2: st.button(t("btn_reset"), on_click=reset_analysis, use_container_width=True, type="secondary")
+
+    # Вкладка 2
+    with tab_archive:
+        col_head, col_refresh = st.columns([4, 1])
+        with col_head: st.subheader(t("arch_title"))
+        with col_refresh:
+            if st.button(t("btn_refresh"), use_container_width=True): st.rerun()
+        history = get_all_history_records()
+        if history:
+            for item in history:
+                rec_id = item.get('record_id')
+                p_name_db = item.get('Patient Name', 'No Name')
+                date_created = item.get('Created At', '')[:10] if item.get('Created At') else item.get('created_time', '')[:10]
+                summary = item.get('Short Summary', '-')
+                method = item.get('Biopsy Method', '-')
+                
+                gen_val = item.get('Gender')
+                is_male = (gen_val == "Мужской" or gen_val == "Male")
+                icon = "👨" if is_male else "👩"
+                
+                with st.container(border=True):
+                    c_h1, c_h2, c_h3 = st.columns([3, 2, 2])
+                    with c_h1: st.markdown(f"**{icon} {p_name_db}**")
+                    with c_h2: st.caption(f"📅 {date_created}")
+                    with c_h3: st.caption(f"🔬 {method}")
+                    st.divider(); st.write(summary)
+                    with st.expander(t("exp_full")):
+                        st.write(item.get('AI Conclusion', ''))
+                        st.markdown("---")
+                        if st.button(t("btn_print"), key=f"btn_{rec_id}", use_container_width=True):
+                            with st.spinner("PDF..."):
+                                img_obj = None
+                                if 'Image' in item and len(item['Image']) > 0:
+                                    img_obj = get_image_from_url(item['Image'][0].get('url'))
+                                pdf_bytes = create_pdf({
+                                    'p_name': p_name_db, 'gender': item.get('Gender', '?'), 'weight': item.get('Weight', 0),
+                                    'dob': item.get('Birth Date', '-'), 'anamnesis': item.get('Anamnesis', '-'), 'biopsy': method
+                                }, item.get('AI Conclusion', ''), img_obj, st.session_state.language)
+                                st.download_button(t("btn_download"), pdf_bytes, f"Report_{p_name_db}.pdf", "application/pdf", key=f"dl_{rec_id}")
+        else: st.info(t("arch_empty"))
