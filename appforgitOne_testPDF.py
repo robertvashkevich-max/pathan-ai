@@ -8,7 +8,7 @@ from pyairtable import Api
 import time
 
 # --- НАСТРОЙКА СТРАНИЦЫ ---
-st.set_page_config(page_title="PathanAI 2.0", page_icon="🔬")
+st.set_page_config(page_title="PathanAI Stable", page_icon="🔬")
 
 # --- ПОДКЛЮЧЕНИЕ КЛЮЧЕЙ ---
 try:
@@ -108,7 +108,7 @@ def create_pdf(patient_data, analysis_text, image_obj):
         except: pass
     
     pdf.ln(5)
-    pdf.cell(0, 10, 'ЗАКЛЮЧЕНИЕ ИИ (Gemini 2.0):', ln=True, fill=True)
+    pdf.cell(0, 10, 'ЗАКЛЮЧЕНИЕ ИИ:', ln=True, fill=True)
     pdf.ln(2)
     pdf.multi_cell(0, 6, analysis_text.replace('**', '').replace('* ', '- '))
     return pdf.output(dest='S').encode('latin-1')
@@ -190,29 +190,7 @@ else:
             if not p_name: 
                 st.warning("Введите имя пациента!")
             else:
-                with st.spinner("Gemini 2.0 анализирует..."):
+                with st.spinner("ИИ анализирует снимок..."):
                     try:
-                        # ТУТ МЫ ИСПОЛЬЗУЕМ ВАШУ МОДЕЛЬ ИЗ СПИСКА
-                        model = genai.GenerativeModel('gemini-2.0-flash-exp')
-                        
-                        prompt = f"Роль: Патологоанатом. Пациент: {p_name}, {gender}, {weight}, {dob}. Анамнез: {anamnesis}. Опиши гистологию, дай заключение и КРАТКИЙ ВЫВОД."
-                        
-                        res = model.generate_content([prompt, img])
-                        txt = res.text
-                        
-                        # Вывод
-                        summ = txt.split("ВЫВОД")[-1][:200] if "ВЫВОД" in txt else "См. полный отчет"
-                        st.markdown("### Результат")
-                        st.write(txt)
-                        
-                        # Сохранение
-                        save_analysis({"p_name": p_name, "gender": gender, "weight": weight, "dob": dob, "anamnesis": anamnesis}, txt, summ, img, st.session_state.user_id)
-                        
-                        # PDF
-                        pdf = create_pdf({"p_name": p_name, "gender": gender, "weight": weight, "dob": dob, "anamnesis": anamnesis}, txt, img)
-                        st.download_button("Скачать PDF", pdf, "report.pdf", "application/pdf")
-                        
-                        st.success("✅ Анализ сохранен в базу!")
-                        
-                    except Exception as e:
-                        st.error(f"Ошибка API: {e}")
+                        # ИСПОЛЬЗУЕМ СТАБИЛЬНУЮ МОДЕЛЬ ИЗ ВАШЕГО СПИСКА
+                        model = genai.GenerativeModel('gemini-flash-latest')
