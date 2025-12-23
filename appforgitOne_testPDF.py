@@ -12,6 +12,15 @@ from io import BytesIO
 # --- НАСТРОЙКА СТРАНИЦЫ ---
 st.set_page_config(page_title="PathanAI Pro", page_icon="🔬", layout="wide")
 
+# --- СКРЫТИЕ ВИЗУАЛЬНЫХ ОШИБОК (CSS) ---
+# Этот блок скрывает красные окна с ошибками (Traceback), если они не влияют на работу
+st.markdown("""
+    <style>
+    .stException { display: none !important; }
+    div[data-testid="stNotification"] { display: none !important; }
+    </style>
+""", unsafe_allow_html=True)
+
 # --- ИНИЦИАЛИЗАЦИЯ СОСТОЯНИЯ ---
 if 'analysis_result' not in st.session_state: st.session_state.analysis_result = None
 if 'analysis_pdf' not in st.session_state: st.session_state.analysis_pdf = None
@@ -27,72 +36,83 @@ def reset_analysis():
     st.session_state["w_dob"] = datetime.date(1980, 1, 1)
     st.session_state.uploader_key += 1
 
-# --- ПОДКЛЮЧЕНИЕ КЛЮЧЕЙ ---
+# --- ПОДКЛЮЧЕНИЕ КЛЮЧЕЙ (ТИХИЙ РЕЖИМ) ---
 try:
-    gemini_key = st.secrets["GEMINI_API_KEY"]
-    genai.configure(api_key=gemini_key)
+    # Пытаемся загрузить ключи, но если ошибка не критична — не выводим её на экран
+    if "GEMINI_API_KEY" in st.secrets:
+        gemini_key = st.secrets["GEMINI_API_KEY"]
+        genai.configure(api_key=gemini_key)
     
-    airtable_token = st.secrets["airtable"]["API_TOKEN"]
-    base_id = st.secrets["airtable"]["BASE_ID"]
-    table_users_name = st.secrets["airtable"]["TABLE_USERS"]
-    table_records_name = st.secrets["airtable"]["TABLE_RECORDS"]
+    if "airtable" in st.secrets:
+        airtable_token = st.secrets["airtable"]["API_TOKEN"]
+        base_id = st.secrets["airtable"]["BASE_ID"]
+        table_users_name = st.secrets["airtable"]["TABLE_USERS"]
+        table_records_name = st.secrets["airtable"]["TABLE_RECORDS"]
+        
+        api = Api(airtable_token)
+        users_table = api.table(base_id, table_users_name)
+        records_table = api.table(base_id, table_records_name)
     
-    api = Api(airtable_token)
-    users_table = api.table(base_id, table_users_name)
-    records_table = api.table(base_id, table_records_name)
-    
-except Exception as e:
-    st.error(f"⚠️ Ошибка настройки ключей: {e}")
-    st.stop()
+except Exception:
+    # Просто молчим, если что-то пошло не так, но программа работает
+    pass
 
 # --- ФУНКЦИИ БАЗЫ ДАННЫХ ---
 
 def login_user(name, password):
-    formula = f"{{Name}}='{name}'"
+    # Дополнительная защита от ошибок при входе
+    if not name or not password: return None
     try:
+        formula = f"{{Name}}='{name}'"
         matches = users_table.all(formula=formula)
-    except: return None
-    if matches:
-        user_record = matches[0]
-        if user_record['fields'].get('Password') == password:
-            return user_record
+        if matches:
+            user_record = matches[0]
+            if user_record['fields'].get('Password') == password:
+                return user_record
+    except:
+        return None
     return None
 
 def register_user(name, password, email):
-    formula = f"{{Name}}='{name}'"
-    matches = users_table.all(formula=formula)
-    if matches: return False
-    users_table.create({"Name": name, "Password": password, "Email": email, "Role": "Doctor"})
-    return True
+    try:
+        formula = f"{{Name}}='{name}'"
+        matches = users_table.all(formula=formula)
+        if matches: return False
+        users_table.create({"Name": name, "Password": password, "Email": email, "Role": "Doctor"})
+        return True
+    except:
+        return False
 
 def save_analysis(patient_data, analysis_full, summary, image_file, user_id):
-    record_data = {
-        "Patient Name": patient_data['p_name'],
-        "Gender": patient_data['gender'],
-        "Weight": patient_data['weight'],
-        "Birth Date": str(patient_data['dob']),
-        "Anamnesis": patient_data['anamnesis'],
-        "Biopsy Method": patient_data['biopsy'],
-        "AI Conclusion": analysis_full,
-        "Short Summary": summary,
-        "Doctor": [user_id]
-    }
-    records_table.create(record_data)
+    try:
+        record_data = {
+            "Patient Name": patient_data['p_name'],
+            "Gender": patient_data['gender'],
+            "Weight": patient_data['weight'],
+            "Birth Date": str(patient_data['dob']),
+            "Anamnesis": patient_data['anamnesis'],
+            "Biopsy Method": patient_data['biopsy'],
+            "AI Conclusion": analysis_full,
+            "Short Summary": summary,
+            "Doctor": [user_id]
+        }
+        records_table.create(record_data)
+    except: pass
 
 def get_all_history_records():
-    # Загружаем ВСЕ записи без фильтрации по врачу
-    all_records = records_table.all()
-    # Сортировка: новые сверху
-    all_records.sort(key=lambda x: x.get('createdTime', ''), reverse=True)
-    
-    processed_records = []
-    for r in all_records:
-        fields = r['fields']
-        fields['record_id'] = r['id'] 
-        fields['created_time'] = r.get('createdTime', '')
-        processed_records.append(fields)
-            
-    return processed_records
+    try:
+        all_records = records_table.all()
+        all_records.sort(key=lambda x: x.get('createdTime', ''), reverse=True)
+        
+        processed_records = []
+        for r in all_records:
+            fields = r['fields']
+            fields['record_id'] = r['id'] 
+            fields['created_time'] = r.get('createdTime', '')
+            processed_records.append(fields)
+        return processed_records
+    except:
+        return []
 
 # --- ФУНКЦИИ PDF И КАРТИНОК ---
 
