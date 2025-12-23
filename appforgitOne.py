@@ -2,6 +2,8 @@ import streamlit as st
 import google.generativeai as genai
 from PIL import Image
 import datetime
+from fpdf import FPDF
+import tempfile
 
 st.set_page_config(page_title="PathanAI", page_icon="🔬")
 
@@ -12,9 +14,72 @@ except (FileNotFoundError, KeyError):
     st.error("⚠️ Ключ API не найден! Настройте 'Secrets' в панели управления Streamlit Cloud.")
     st.stop()
 
-# --- НАСТРОЙКА МОДЕЛИ ---
 genai.configure(api_key=api_key)
 
+# --- ФУНКЦИЯ ГЕНЕРАЦИИ PDF ---
+def create_pdf(patient_data, analysis_text, image_obj):
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # 1. Подключаем русский шрифт
+    try:
+        pdf.add_font('DejaVu', '', 'DejaVuSans.ttf', uni=True)
+        pdf.set_font('DejaVu', '', 12)
+    except:
+        pdf.set_font("Arial", size=12)
+
+    # 2. Заголовок
+    pdf.set_font('DejaVu', '', 20)
+    pdf.cell(0, 10, 'PathanAI: Медицинское заключение', ln=True, align='C')
+    pdf.set_font('DejaVu', '', 10)
+    pdf.cell(0, 10, 'Система поддержки принятия врачебных решений', ln=True, align='C')
+    pdf.ln(5)
+
+    # 3. Данные пациента
+    pdf.set_fill_color(240, 240, 240)
+    pdf.set_font('DejaVu', '', 12)
+    
+    pdf.cell(0, 10, 'ДАННЫЕ ПАЦИЕНТА:', ln=True, fill=True)
+    text_data = (
+        f"Пол: {patient_data['gender']} | Вес: {patient_data['weight']} кг | Д.Р.: {patient_data['dob']}\n"
+        f"Курение: {patient_data['smoking']}\n"
+        f"Биопсия: {patient_data['biopsy']} | Ткань: {patient_data['tissue']}\n"
+        f"Анамнез: {patient_data['anamnesis']}"
+    )
+    pdf.multi_cell(0, 8, text_data)
+    pdf.ln(5)
+
+    # 4. Изображение
+    if image_obj:
+        try:
+            if image_obj.mode == 'RGBA':
+                image_obj = image_obj.convert('RGB')
+                
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+                image_obj.save(tmp.name)
+                pdf.image(tmp.name, x=55, w=100) 
+                pdf.ln(5)
+        except Exception as e:
+            pdf.set_font('DejaVu', '', 10)
+            pdf.cell(0, 10, f'[Не удалось добавить изображение: {str(e)}]', ln=True)
+
+    # 5. Результаты
+    pdf.set_fill_color(240, 240, 240)
+    pdf.set_font('DejaVu', '', 12)
+    pdf.cell(0, 10, 'ЗАКЛЮЧЕНИЕ ИИ:', ln=True, fill=True)
+    pdf.ln(2)
+    
+    clean_text = analysis_text.replace('**', '').replace('##', '').replace('* ', '- ')
+    pdf.multi_cell(0, 6, clean_text)
+    
+    # 6. Подвал
+    pdf.ln(10)
+    pdf.set_font('DejaVu', '', 8)
+    pdf.cell(0, 10, 'Дисклеймер: Данный отчет создан ИИ-прототипом PathanAI. Требует верификации врачом.', ln=True, align='C')
+
+    return pdf.output(dest='S').encode('latin-1')
+
+# --- ПОЛУЧЕНИЕ МОДЕЛИ ---
 def get_model():
     valid_model = None
     try:
@@ -36,13 +101,13 @@ def get_model():
 
 model_name = get_model()
 
-# --- ИНТЕРФЕЙС (ЗАГОЛОВКИ ОБНОВЛЕНЫ) ---
+# --- ИНТЕРФЕЙС ---
 st.title("🔬 PathanAI")
 st.header("Система поддержки принятия врачебных решений")
 st.write("Разработано в целях улучшения результатов лечения пациентов с патологией, основанной на искусственном интеллекте")
 
-# --- ШАГ 1: ДАННЫЕ ПАЦИЕНТА ---
-with st.expander("📝 Данные пациента (Нажмите, чтобы свернуть/развернуть)", expanded=True):
+# --- ШАГ 1: ДАННЫЕ ---
+with st.expander("📝 Данные пациента", expanded=True):
     col1, col2, col3 = st.columns(3)
     with col1:
         gender = st.selectbox("Пол", ["Не указан", "Мужской", "Женский"])
@@ -58,17 +123,19 @@ with st.expander("📝 Данные пациента (Нажмите, чтобы
         smoking = st.selectbox("Курение:", ["Не курит", "Курит сейчас", "В прошлом", "Неизвестно"])
 
     tissue_type = st.selectbox("Тип ткани:", ["Неизвестно", "Кожа", "Слизистая", "Лимфоузел", "Молочная железа", "Печень", "Легкое", "Другое"])
-    anamnesis = st.text_area("Анамнез:", placeholder="Жалобы, динамика роста, особенности течения...")
+    anamnesis = st.text_area("Анамнез:", placeholder="Жалобы...")
 
-# --- ИНИЦИАЛИЗАЦИЯ ИСТОРИИ ЧАТА ---
+# --- ИСТОРИЯ ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "chat_session" not in st.session_state:
-    st.session_state.chat_session = None 
+    st.session_state.chat_session = None
+if "full_analysis" not in st.session_state:
+    st.session_state.full_analysis = ""
 
-# --- ШАГ 2: ЗАГРУЗКА ФОТО ---
+# --- ШАГ 2: ФОТО ---
 st.markdown("---")
-uploaded_file = st.file_uploader("Загрузите снимок для начала анализа", type=["jpg", "png", "jpeg"])
+uploaded_file = st.file_uploader("Загрузите снимок", type=["jpg", "png", "jpeg"])
 
 if "last_file" not in st.session_state:
     st.session_state.last_file = None
@@ -76,64 +143,77 @@ if "last_file" not in st.session_state:
 if uploaded_file and uploaded_file.name != st.session_state.last_file:
     st.session_state.messages = []
     st.session_state.chat_session = None
+    st.session_state.full_analysis = ""
     st.session_state.last_file = uploaded_file.name
 
-# --- ОСНОВНАЯ ЛОГИКА ---
+# --- ЛОГИКА ---
 if uploaded_file:
     image = Image.open(uploaded_file)
     st.image(image, caption="Образец", width=300)
 
-    # Если история пуста, показываем кнопку запуска
     if not st.session_state.messages:
         if st.button("🚀 Начать анализ", type="primary"):
             if not model_name:
-                st.error("Ошибка подключения к AI.")
+                st.error("Ошибка AI.")
             else:
-                with st.spinner('ИИ анализирует снимок...'):
+                with st.spinner('Анализ...'):
                     initial_prompt = f"""
-                    Ты эксперт-патологоанатом. Проанализируй этот снимок.
-                    Данные пациента: Пол {gender}, Вес {weight}, Д.Р. {dob}, Курение: {smoking}.
-                    Тип ткани: {tissue_type}, Метод: {biopsy_method}.
+                    Ты эксперт-патологоанатом. Анализ снимка.
+                    Пациент: {gender}, {weight}кг, д.р. {dob}, курение: {smoking}.
+                    Ткань: {tissue_type}, Метод: {biopsy_method}.
                     Анамнез: {anamnesis}.
                     
-                    Структура твоего ответа должна быть такой:
-                    1. Микроскопическое описание (подробно).
-                    2. Патологические изменения.
-                    3. Развернутое заключение.
-                    4. ОЧЕНЬ КРАТКИЙ ВЫВОД (резюме в 1-2 предложениях, самая суть для быстрого чтения).
+                    Структура ответа:
+                    1. Микроскопическое описание.
+                    2. Патология.
+                    3. Заключение.
+                    4. ОЧЕНЬ КРАТКИЙ ВЫВОД.
                     """
-                    
                     try:
                         model = genai.GenerativeModel(model_name)
                         chat = model.start_chat(history=[])
                         response = chat.send_message([initial_prompt, image])
                         
                         st.session_state.chat_session = chat
+                        st.session_state.full_analysis = response.text
                         st.session_state.messages.append({"role": "assistant", "content": response.text})
                         st.rerun()
-                        
                     except Exception as e:
                         st.error(f"Ошибка: {e}")
 
-    # --- ОТОБРАЖЕНИЕ ЧАТА ---
+    # ЧАТ
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # --- ПОЛЕ ВВОДА ---
-    if prompt := st.chat_input("Задайте уточняющий вопрос по снимку..."):
+    # --- КНОПКА СКАЧИВАНИЯ PDF ---
+    if st.session_state.full_analysis:
+        st.markdown("---")
+        p_data = {
+            "gender": gender, "weight": weight, "dob": dob, "smoking": smoking,
+            "biopsy": biopsy_method, "tissue": tissue_type, "anamnesis": anamnesis
+        }
+        
+        pdf_bytes = create_pdf(p_data, st.session_state.full_analysis, image)
+        
+        st.download_button(
+            label="📄 Скачать официальный отчет (PDF)",
+            data=pdf_bytes,
+            file_name=f"PathanAI_Report_{datetime.date.today()}.pdf",
+            mime="application/pdf"
+        )
+
+    # ВВОД
+    if prompt := st.chat_input("Вопрос по снимку..."):
         with st.chat_message("user"):
             st.markdown(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
 
         if st.session_state.chat_session:
             try:
-                with st.spinner("Думаю..."):
-                    response = st.session_state.chat_session.send_message(prompt)
-                    with st.chat_message("assistant"):
-                        st.markdown(response.text)
-                    st.session_state.messages.append({"role": "assistant", "content": response.text})
+                response = st.session_state.chat_session.send_message(prompt)
+                with st.chat_message("assistant"):
+                    st.markdown(response.text)
+                st.session_state.messages.append({"role": "assistant", "content": response.text})
             except Exception as e:
-                st.error(f"Ошибка соединения: {e}")
-        else:
-            st.error("Сессия истекла. Перезагрузите страницу.")
+                st.error(f"Ошибка: {e}")
